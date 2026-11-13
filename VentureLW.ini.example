@@ -1,0 +1,133 @@
+; ---------------------------------------------------------------------------
+; VentureLW.ini - sample configuration for the VentureLW platform DLL
+; ---------------------------------------------------------------------------
+;
+; This file is optional.  Copy it next to gamemd.exe (the same directory as
+; rules.ini) and rename it to VentureLW.ini.  If the file is missing, every
+; setting falls back to its default and the platform still starts.
+;
+; Format: standard Windows INI (the game's GetPrivateProfileString semantics).
+; Section and key names are case-insensitive.  Booleans accept
+; yes/no, true/false, on/off and 1/0 (case-insensitive, whole token).  A value
+; that cannot be parsed falls back to the declared default and is reported as a
+; warning in the log; unknown keys are reported at startup too (see
+; IniWarnUnknownKeys below and docs/Ini.md).  An invalid [Features] switch value
+; is counted in the startup "ini keys:" summary together with the feature keys.
+;
+; Size limits: the file is read through the Win32 profile API, so one raw value
+; is capped at 511 characters.  A value that fills the buffer is reported with a
+; "may be truncated" warning and the platform validates the truncated text; a
+; key name longer than 255 characters cannot be represented.  Keep values well
+; inside these limits.
+;
+; The platform is a starter base: this base contains no gameplay features, so
+; turning switches on or off does not change the game yet.  The [Features]
+; section exists so derived platforms have a stable place to add their switches.
+;
+; ---------------------------------------------------------------------------
+
+[Platform]
+; LogLevel: minimum level written to VentureLW.log.
+;   error | warn | info (default) | debug      (numeric 0-3 also accepted:
+;                                               0=debug, 1=info, 2=warn, 3=error)
+; Suppressed lines cost only a level comparison; debug is the full per-object
+; diagnostic trail.  See docs/Logging.md.
+LogLevel=info
+
+; VerboseLogging: legacy alias for LogLevel=debug.  yes enables DEBUG lines
+; exactly like LogLevel=debug and wins when both are configured.  Kept for
+; compatibility; new configurations should use LogLevel.
+VerboseLogging=no
+
+; DebugOutput: no (default) keeps debugger output silent in a RELEASE build;
+; yes mirrors every logged line to an attached debugger.  Leave no for release;
+; set yes only while debugging with a debugger attached.  A DEBUG build always
+; writes to the debugger.
+DebugOutput=no
+
+; LineagePolicy: what to do when another DLL of the VentureLW lineage is
+; already loaded in the same process (two would each build their own extension
+; table and savegame trailer).
+;   refuse (default) - log the conflict and leave the platform disabled; the
+;                      game keeps running without the platform's features
+;   warn             - log the conflict and continue (diagnostics only; the two
+;                      lineage DLLs would fight over the shared state)
+; See docs/Lineage.md.
+LineagePolicy=refuse
+
+; IniTakeover: hide the keys this platform owns in rules(md).ini from other
+; platform DLLs loaded next to VentureLW (the official Phobos would otherwise
+; read the same keys and double-count the feature).  yes (default) removes the
+; owned keys from the parsed rules INI after this platform read them; no leaves
+; them visible for the other platforms.  Only registered (section,key) pairs are
+; affected.  See docs/Ini.md.
+IniTakeover=yes
+
+; IniWarnUnknownKeys: yes (default) warns about unknown keys in [Platform],
+; [Groups] and feature sections, and about unknown [Features] switches (with a
+; "did you mean ...?" suggestion).  no downgrades those lines to debug.  Keys of
+; user-defined/third-party sections are only logged at debug level either way.
+IniWarnUnknownKeys=yes
+
+; DumpIniTemplate: development aid, default no.  yes writes
+; VentureLW.ini.generated next to the log at startup: the key registry as an
+; INI file (with type/default/range/description comments), for comparing this
+; example with what the code really reads.  The generated values are the
+; declared defaults, not the values this local file contains.  Not needed by
+; players.
+DumpIniTemplate=no
+
+[Groups]
+; Optional master switch per feature group: <group>=yes|no, default yes.  A
+; group is declared by FeatureDescriptor::group; no disables every module of the
+; group (the per-module [Features] switch still exists).  The base declares no
+; group, so this section is normally empty; a derived platform adds its groups
+; here.  Example:
+; Combat=yes
+
+[Features]
+; One switch per feature MODULE (one FeatureDescriptor, one directory under
+; src/Features/), not one per key: a module with any number of keys - or with
+; no keys at all - still has exactly one line here.  key = FeatureDescriptor.iniKey,
+; value = yes/no; features default to on when a key is missing or invalid.  (The
+; internal FeatureDescriptor.id is not the switch key; it is used for logs and
+; lookup.)  The module's own keys do not belong in this section: put them in the
+; module's own section (see the Example modules below) or in rules(md).ini; the
+; module declares and reads them itself with the INI key registry (see
+; docs/Ini.md); the base validates them and warns about invalid values and
+; unknown keys.  A switch is on by default; a module can set the optional
+; descriptor field defaultEnabled=false to be off unless opted in.  A feature
+; that declares host requirements (FeatureDescriptor::requiredHosts / anyOfHosts)
+; is additionally gated by the detected host set: every required host must be
+; present, and at least one any-of host when that list is not empty (see
+; docs/HostMatrix.md).
+
+; Example module (id: example_unit_counter): counts UnitClass create/destroy
+; transitions, logs one INFO progress line every 100 units (per-unit transitions
+; are DEBUG-only, so the default level stays quiet in a big battle) and one INFO
+; summary when the last tracked unit is gone.  It has no gameplay effect; it
+; exists to demonstrate the extension store, the lifecycle hooks, the logging
+; policy and the feature switch.  See docs/MakeYourOwnPlatform.md and
+; docs/Logging.md.
+Example=yes
+
+; Example INI module (id: example_ini_key): reads [Examples] UnitCounterLog from
+; rules(md).ini and registers the pair as owned, to demonstrate the rules/art INI
+; read API and the takeover.  It has no gameplay effect.  See docs/Ini.md.
+ExampleIniKey=yes
+
+; ---------------------------------------------------------------------------
+; Module-owned keys
+; ---------------------------------------------------------------------------
+; If a feature module has its own <Platform>.ini keys they live in the module's
+; own section - NOT in [Features].  A declared key looks like:
+;
+; [MyFeature]
+; ; description, type, default and range are taken from the declaration
+; LogEveryUnit=no
+; ProgressEvery=100
+;
+; The module declares each key at its read site with VENTURE_INI_BOOL /
+; VENTURE_INI_INT / VENTURE_INI_STRING (platform/Feature.h); the base validates
+; the value, logs the effective value, feeds the unknown-key scan and includes
+; the key in the DumpIniTemplate output.  The base ships no such keys.
