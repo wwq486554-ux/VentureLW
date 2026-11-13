@@ -6,9 +6,9 @@ VentureLW is a **GPL-3.0 platform DLL** for *Command & Conquer: Yuri's Revenge*
 ported from the **Phobos-LWModified** fork.
 
 > **Status: v0.1.0 (bootstrap, 2026-11-14)** - the first build of the platform:
-> the identity was renamed from the base and the platform has its own savegame
-> trailer id.  No gameplay feature module has been migrated yet; it is not a
-> feature-complete mod.
+> the identity was renamed from the base, the platform has its own savegame
+> trailer id, and the first gameplay feature has been migrated (large-range
+> radial indicator drawing).  It is not a feature-complete mod yet.
 
 ## What this platform provides
 
@@ -20,8 +20,9 @@ build/verification tooling.
 
 Feature modules (`src/Features/`), registered as one `[Features]` switch each:
 
-None yet in this bootstrap commit - the first module (`RadialIndicator`) lands
-in the next commit.
+| Module | Switch | What it does |
+| --- | --- | --- |
+| `RadialIndicator` | `[Features] RadialIndicator` (default on) | Draws the radial indicator's two concentric ellipse outlines with double-precision scan lines once the engine's 32-bit ellipse rasterizer would overflow, so selected-unit / placement-preview / superweapon-targeting rings stay visible at long ranges instead of disappearing.  Rendering only; no INI keys, no savegame change.  See `docs/Fixed-or-Improved-Logics.md`. |
 
 The stock `Example` / `ExampleIniKey` modules of the base are kept: they have no
 gameplay effect and serve as the base's own smoke tests.

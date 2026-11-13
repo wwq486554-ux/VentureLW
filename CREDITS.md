@@ -2,8 +2,8 @@
 
 ## VentureLW platform
 
-- **laowang** - platform bootstrap (identity, build, verification) and
-  documentation.
+- **laowang** - platform bootstrap (identity, build, verification), feature
+  modules, documentation.  Ported `RadialIndicator` into the platform.
 
 ## Base
 
@@ -16,6 +16,8 @@
 
 - **laowang** - original implementation of the Phobos-LWModified gameplay
   features and of the fork's additions.
+- **Radial indicator large-range drawing** - original fork implementation
+  `41bc10fe` (docs `1865743c`, 2026-10-24), ported to VentureLW 2026-11-14.
 
 ## Pending attribution (not in this build yet)
 

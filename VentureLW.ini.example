@@ -116,6 +116,14 @@ Example=yes
 ; read API and the takeover.  It has no gameplay effect.  See docs/Ini.md.
 ExampleIniKey=yes
 
+; Radial indicator (id: radial_indicator): draw the radial indicator's two
+; concentric ellipse outlines with double-precision scan lines once the pixel
+; radius would overflow the engine's 32-bit ellipse rasterizer (the ring used
+; to disappear entirely at long ranges, roughly range 30 and above).
+; Rendering only - no game state is written; no keys of its own, so this
+; switch is the whole configuration.  See docs/Fixed-or-Improved-Logics.md.
+RadialIndicator=yes
+
 ; ---------------------------------------------------------------------------
 ; Module-owned keys
 ; ---------------------------------------------------------------------------

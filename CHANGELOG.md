@@ -29,7 +29,21 @@ platform identity; see the base `docs/Renaming.md`).
 
 ### Added
 
+- **Radial indicator large-range drawing** (`[Features] RadialIndicator`,
+  default on) - ported from Phobos-LWModified commits `41bc10fe` +
+  `1865743c`.  The engine's ellipse rasterizer uses 32-bit integer
+  discriminants, so the radial indicator's ring disappears completely once the
+  radius grows large (roughly a 30 cell range and beyond).  The platform now
+  watches both `call [vtable+0x20]` sites of `Game::DrawRadialIndicator`
+  (`0x456B57`, size 8 - outer ring; `0x456BEB`, size 7 - inner ring) and draws
+  the outline itself with double-precision scan lines once the conservative
+  limit is crossed; below it the engine path is replayed unchanged.  Rendering
+  only - no game state is written.  **No new INI keys; no savegame change.**
+  See `docs/Fixed-or-Improved-Logics.md` and `docs/HookCatalogue.md`.
 - `COPYING` (GPL-3.0), `CREDITS.md` and this changelog.
+- A base-sync helper for pulling later VentureCore fixes into the platform:
+  `scripts/base-sync/` (semi-automatic; the identity of this platform is re-applied
+  by hand after each sync).
 
 ### Base machinery
 
