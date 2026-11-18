@@ -148,15 +148,18 @@ What is checked
        therefore not appear in the image; if it does, an assert path is still
        active in the release artifact (TOOL-03).
 
-12. INI live/probe tooling self-checks (source)
-       ``scripts/check_live_log.py`` (judges a live ``<Platform>.log``) and
+12. Offline tooling self-checks (source)
+       ``scripts/check_live_log.py`` (judges a live ``<Platform>.log``),
        ``scripts/compare_ini_template.py`` (compares the generated template with
-       the shipped example) carry an offline ``--self-check`` mode against a
-       repository fixture.  Both are run here, so the tools that the in-game
-       acceptance verdict depends on are themselves part of the automatic gate
+       the shipped example) and ``scripts/verify_hook_windows.py`` (validates the
+       hook windows; its objdump parser and window tiler) carry an offline
+       ``--self-check`` mode against a repository fixture.  All three are run
+       here, so the tools that the in-game acceptance verdict and the
+       hook-window gate depend on are themselves part of the automatic gate
        (INI-07): a change that breaks their parsing, duplicate-key detection,
-       template-freshness rule or platform-name derivation fails this check even
-       when no game is available.
+       template-freshness rule, platform-name derivation or the handling of
+       objdump's continuation lines fails this check even when no game is
+       available.
 
 Exit status is 0 when no check fails and 1 otherwise.  A skipped check (see
 check 10) is reported as ``[SKIP]`` and counted in the result line - it is not a
@@ -212,14 +215,16 @@ GIT_COMMIT_KEY = "GitCommit"
 GIT_REF_KEY = "GitRef"
 GIT_COMMAND_TIMEOUT_SECONDS = 15
 
-# The in-game log/template tools carry an offline self-check that is part of the
-# automatic acceptance gate (INI-07).  The marker makes a silently-truncated or
-# silently-skipped run fail instead of passing on the exit code alone.
-INI_TOOL_SELF_CHECKS: Tuple[Tuple[str, str], ...] = (
+# The in-game log/template tools and the offline hook-window validator carry an
+# offline self-check that is part of the automatic acceptance gate (INI-07).
+# The marker makes a silently-truncated or silently-skipped run fail instead of
+# passing on the exit code alone.
+TOOL_SELF_CHECKS: Tuple[Tuple[str, str], ...] = (
     ("compare_ini_template.py", "SELF-CHECK: PASS"),
     ("check_live_log.py", "SELF-CHECK: PASS"),
+    ("verify_hook_windows.py", "SELF-CHECK: PASS"),
 )
-INI_TOOL_TIMEOUT_SECONDS = 120
+TOOL_SELF_CHECK_TIMEOUT_SECONDS = 120
 
 # The 2.0 removal of the legacy host "support tier" (see docs/HostMatrix.md).
 # These spellings must not appear anywhere in the repository that describes the
@@ -1451,16 +1456,17 @@ def check_release_assertions(data: bytes) -> Check:
 
 
 # ---------------------------------------------------------------------------
-# Check 12: INI live/probe tooling self-checks (source)
+# Check 12: offline tooling self-checks (source)
 # ---------------------------------------------------------------------------
 
 
-def check_ini_tooling_self_checks() -> Check:
-    """Run the offline self-check of both in-game INI tools (INI-07)."""
-    title = "INI live/probe tooling self-checks"
+def check_tooling_self_checks() -> Check:
+    """Run the offline self-checks of the in-game INI tools and the hook-window
+    validator (INI-07)."""
+    title = "Offline tooling self-checks"
     details: List[str] = []
     failures: List[str] = []
-    for script, marker in INI_TOOL_SELF_CHECKS:
+    for script, marker in TOOL_SELF_CHECKS:
         path = os.path.join(REPO_ROOT, "scripts", script)
         if not os.path.isfile(path):
             failures.append("%s: missing from scripts/" % script)
@@ -1469,7 +1475,7 @@ def check_ini_tooling_self_checks() -> Check:
             result = subprocess.run(
                 [sys.executable, path, "--self-check"],
                 cwd=REPO_ROOT, capture_output=True, text=True,
-                timeout=INI_TOOL_TIMEOUT_SECONDS)
+                timeout=TOOL_SELF_CHECK_TIMEOUT_SECONDS)
         except (OSError, subprocess.TimeoutExpired) as exc:
             failures.append("%s: could not run the self-check: %s"
                             % (script, exc))
@@ -1490,7 +1496,7 @@ def check_ini_tooling_self_checks() -> Check:
             details.append("%s: %s" % (script, marker_line))
     if failures:
         return Check(False, title,
-                     "an in-game INI tool self-check failed", extra=failures)
+                     "an offline tooling self-check failed", extra=failures)
     return Check(True, title, "; ".join(details))
 
 
@@ -1563,7 +1569,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         report.append(check_log_policy_source())
         report.append(check_legacy_tier_removed())
         report.append(check_closed_source_host_removed())
-        report.append(check_ini_tooling_self_checks())
+        report.append(check_tooling_self_checks())
         print_report(report)
         return 1
 
@@ -1632,9 +1638,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     checks.append(check_release_assertions(data))
 
     # -- check 12 --------------------------------------------------------
-    # The in-game log/template tools are what the human probe run is judged
-    # with; their offline self-checks belong to the automatic gate (INI-07).
-    checks.append(check_ini_tooling_self_checks())
+    # The offline self-checks cover the tools that the human probe run and the
+    # hook-window verdict are judged with; they belong to the automatic gate
+    # (INI-07).
+    checks.append(check_tooling_self_checks())
 
     print_report(checks)
     return 0 if all(check.ok for check in checks) else 1

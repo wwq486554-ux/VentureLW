@@ -18,6 +18,13 @@ read-only - the engine executable is never executed):
     supported case is the engine loaded at its preferred base, and the reported
     range adapts to whatever ``ImageBase`` the supplied executable header has);
   * ``size`` is at least 5 bytes (the size of a 32-bit near jump);
+  * objdump prints an instruction longer than seven bytes over several hex
+    lines: the continuation lines carry the remaining bytes and an address but
+    no mnemonic.  They are folded back into the instruction they belong to, so a
+    long engine instruction is never mistaken for a short one followed by a fake
+    instruction.  (That mistake once let a window which cut a 10-byte engine
+    instruction in half pass as valid - the startup crash this validator missed;
+    the fixture cases of ``--self-check`` pin the fix down);
   * starting at ``address``, the decoded instructions tile the window exactly:
     instruction follows instruction, none is cut in half, and the last covered
     instruction ends precisely at ``address + size`` (so ``address + size`` is an
@@ -40,6 +47,8 @@ Usage
     python3 scripts/verify_hook_windows.py --gamemd /path/to/gamemd.exe
     VCS_GAMEMD_EXE=/path/to/gamemd.exe python3 scripts/verify_hook_windows.py
 
+    python3 scripts/verify_hook_windows.py --self-check   # offline, no engine
+
     python3 scripts/verify_build.py --gamemd /path/to/gamemd.exe
 
 Exit status: 0 - every window validated; 1 - at least one record or window is
@@ -55,7 +64,7 @@ import re
 import struct
 import subprocess
 import sys
-from typing import Dict, List, NamedTuple, Optional, Sequence
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
 # Facts about the SyringeEx hook declaration / PE image / x86 decoding
@@ -333,7 +342,18 @@ class Instruction(NamedTuple):
 
 
 def _parse_objdump_disassembly(output: str) -> Dict[int, Instruction]:
+    """Parse one objdump disassembly into {instruction_start: Instruction}.
+
+    objdump wraps the hex bytes of an instruction longer than seven bytes over
+    several lines: the first line carries the mnemonic, the continuation lines
+    carry an address and the remaining bytes but no mnemonic.  The continuation
+    bytes are folded back into the instruction they belong to; parsing them as
+    separate instructions would record a 10-byte engine instruction as a
+    7-byte instruction plus a 3-byte fake one, and a window that cuts the real
+    instruction in half would then appear to tile exactly.
+    """
     instructions: Dict[int, Instruction] = {}
+    previous: Optional[Instruction] = None
     for line in output.splitlines():
         match = DISASSEMBLY_LINE_RE.match(line)
         if match is None:
@@ -341,11 +361,17 @@ def _parse_objdump_disassembly(output: str) -> Dict[int, Instruction]:
         address = int(match.group(1), 16)
         raw = match.group(2).split()
         text = match.group(3).strip()
+        if (not text and previous is not None
+                and address == previous.address + previous.length):
+            # Hex continuation line of the instruction parsed just before.
+            previous = previous._replace(length=previous.length + len(raw))
+            instructions[previous.address] = previous
+            continue
         decoded = not (text.startswith(".byte") or "(bad)" in text)
+        previous = Instruction(address, len(raw), text, decoded)
         # The first occurrence per address wins (there is only one objdump
         # invocation per window, so this is belt-and-braces only).
-        instructions.setdefault(
-            address, Instruction(address, len(raw), text, decoded))
+        instructions.setdefault(address, previous)
     return instructions
 
 
@@ -408,6 +434,48 @@ def _format_instruction(instruction: Instruction) -> str:
         instruction.address, instruction.length, instruction.text)
 
 
+def _tile_window(
+        address: int, size: int, instructions: Dict[int, Instruction]
+) -> Tuple[List[str], List[Instruction]]:
+    """Tile ``[address, address + size)`` with decoded instructions.
+
+    Returns ``(problems, covered)``.  Kept separate from ``validate_window`` so
+    the offline ``--self-check`` exercises exactly the tiling logic that ships
+    (the regression was a parser/tiling interaction, not a range check).
+    """
+    problems: List[str] = []
+    covered: List[Instruction] = []
+    window_end = address + size
+    position = address
+    while position < window_end:
+        instruction = instructions.get(position)
+        if instruction is None:
+            problems.append(
+                "no instruction starts at 0x%08X inside the window - the "
+                "window does not begin on an instruction boundary or objdump "
+                "lost sync" % position)
+            break
+        if not instruction.decoded:
+            problems.append(
+                "objdump could not decode the instruction at 0x%08X (%s) - the "
+                "bytes are not valid x86 code" % (position, instruction.text))
+            break
+        if position + instruction.length > window_end:
+            covered.append(instruction)
+            problems.append(
+                "instruction at 0x%08X (%d bytes, %s) crosses the window end "
+                "0x%08X - the window cuts an instruction in half"
+                % (position, instruction.length, instruction.text, window_end))
+            break
+        covered.append(instruction)
+        position += instruction.length
+    if position != window_end and not problems:
+        problems.append(
+            "instructions from 0x%08X cover only up to 0x%08X, not the full "
+            "window end 0x%08X" % (address, position, window_end))
+    return problems, covered
+
+
 def validate_window(engine: EngineImage, record: HookRecord) -> WindowResult:
     """Validate one hook window against the engine's decoded instructions."""
     problems: List[str] = []
@@ -441,33 +509,8 @@ def validate_window(engine: EngineImage, record: HookRecord) -> WindowResult:
     decode_stop = min(window_end + DECODE_PAD_BYTES, text_hi)
     instructions = decode_range(engine.path, address, decode_stop)
 
-    position = address
-    while position < window_end:
-        instruction = instructions.get(position)
-        if instruction is None:
-            problems.append(
-                "no instruction starts at 0x%08X inside the window - the "
-                "window does not begin on an instruction boundary or objdump "
-                "lost sync" % position)
-            break
-        if not instruction.decoded:
-            problems.append(
-                "objdump could not decode the instruction at 0x%08X (%s) - the "
-                "bytes are not valid x86 code" % (position, instruction.text))
-            break
-        if position + instruction.length > window_end:
-            covered.append(instruction)
-            problems.append(
-                "instruction at 0x%08X (%d bytes, %s) crosses the window end "
-                "0x%08X - the window cuts an instruction in half"
-                % (position, instruction.length, instruction.text, window_end))
-            break
-        covered.append(instruction)
-        position += instruction.length
-    if position != window_end and not problems:
-        problems.append(
-            "instructions from 0x%08X cover only up to 0x%08X, not the full "
-            "window end 0x%08X" % (address, position, window_end))
+    tile_problems, covered = _tile_window(address, size, instructions)
+    problems.extend(tile_problems)
 
     if not problems:
         following = instructions.get(window_end)
@@ -585,6 +628,76 @@ def validate(dll_path: str, gamemd_path: str,
 
 
 # ---------------------------------------------------------------------------
+# Offline self-check (fixtures; no engine executable and no objdump needed)
+# ---------------------------------------------------------------------------
+
+
+def _self_check() -> int:
+    """Exercise the objdump parser and the window tiler on pinned fixtures.
+
+    The regression this guards: objdump wraps the hex bytes of an instruction
+    longer than seven bytes over several lines, and parsing the continuation as
+    its own instruction made a window that cuts the instruction in half look
+    valid (the startup crash this validator missed).  The fixture below is the
+    real shape of the 10-byte ``mov dword [esi+0x49c],1`` in the pinned
+    ``gamemd.exe``.
+    """
+    cases = 0
+    failures: List[str] = []
+
+    def check(name: str, passed: bool, detail: str = "") -> None:
+        nonlocal cases
+        cases += 1
+        if not passed:
+            failures.append(name + ((": " + detail) if detail else ""))
+
+    fixture = "\n".join([
+        "  6f42e3:\tc7 86 9c 04 00 00 01 \tmov    DWORD PTR [esi+0x49c],0x1",
+        "  6f42ea:\t00 00 00 ",
+        "  6f42ed:\tc7 86 a0 04 00 00 00 \tmov    DWORD PTR [esi+0x4a0],0x0",
+        "  6f42f4:\t00 00 00 ",
+        "  6f42f7:\t5e                   \tpop    esi",
+        "  6f42f8:\tc3                   \tret",
+        "  6f42f9:\t90                   \tnop",
+    ])
+    instructions = _parse_objdump_disassembly(fixture)
+
+    first = instructions.get(0x6F42E3)
+    check("the continuation bytes are folded into the 10-byte instruction",
+          first is not None and first.length == 10 and first.decoded,
+          "got %r" % (first,))
+    check("the continuation address is not an instruction of its own",
+          0x6F42EA not in instructions)
+    check("the next instruction starts at address + 10",
+          0x6F42ED in instructions)
+
+    problems, _ = _tile_window(0x6F42E3, 7, instructions)
+    check("a 7-byte window over the 10-byte instruction is rejected",
+          bool(problems), "no problem reported")
+    problems, _ = _tile_window(0x6F42E3, 10, instructions)
+    check("the full 10-byte window tiles exactly", not problems,
+          "; ".join(problems))
+
+    problems, _ = _tile_window(0x6F42F7, 2, instructions)
+    check("a multi-instruction window still tiles", not problems,
+          "; ".join(problems))
+
+    undecoded = _parse_objdump_disassembly(
+        "  401000:\t0f 0b \t.byte 0x0f, 0x0b")
+    check("objdump's data fallback stays undecoded",
+          undecoded.get(0x401000) is not None
+          and undecoded[0x401000].decoded is False)
+
+    if failures:
+        print("verify_hook_windows.py SELF-CHECK: FAIL (%d case(s))" % cases)
+        for failure in failures:
+            print("  FAILED: %s" % failure)
+        return 1
+    print("verify_hook_windows.py SELF-CHECK: PASS (%d cases)" % cases)
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Standalone entry point
 # ---------------------------------------------------------------------------
 
@@ -616,7 +729,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--expected-count", type=int, default=None,
         help="expected number of hook records (e.g. the hook catalogue row "
              "count); omit not to assert the count")
+    parser.add_argument(
+        "--self-check", action="store_true",
+        help="run the offline fixture cases of the objdump parser and window "
+             "tiler and exit (no engine executable needed)")
     args = parser.parse_args(argv)
+
+    if args.self_check:
+        return _self_check()
 
     gamemd_path = resolve_gamemd_path(args.gamemd)
     if gamemd_path is None:
