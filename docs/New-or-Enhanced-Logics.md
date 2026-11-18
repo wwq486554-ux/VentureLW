@@ -92,3 +92,11 @@ ROFCurve.Cycle=no            ; boolean
 > Ported from Phobos-LWModified (commits `47023891` / `b950ac50` / `6c54bd6f`,
 > 2026-10).  The seven keys and the curve are unchanged; the injection points and
 > the state storage follow the platform's rules.
+>
+> **The Chinese tuning guide `guides/ROF曲线说明.txt` documents both versions** -
+> the Phobos-LWModified one and this platform's - side by side, because the same
+> keys behave differently in three places: the platform has the `[Features]
+> ROFCurve` switch the fork does not, the fork's curve can also pace
+> `SweepFire.Cooldown` / `Temporal.Interval` but those features are not ported
+> yet, and a `DiskLaser=yes` weapon follows the curve here while the fork's
+> EBX-based read silently missed it.

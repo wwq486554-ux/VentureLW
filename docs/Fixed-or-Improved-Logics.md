@@ -71,6 +71,14 @@
 > `TemporalClass::GetWarpPerStep` because it owns that function, while the
 > platform leaves `0x71AB10` to a co-loaded official Phobos and corrects the
 > result at the update tail both hosts share.
+>
+> **The Chinese guide `guides/Temporal武器任意武器槽说明.txt` documents both
+> versions** - the fork's `[General] TemporalWeapon.AnySlot` key against the
+> platform's zero-key `[Features] TemporalAnySlot` switch, the difference in how
+> the erase rate is corrected (the fork swaps weapon + warhead together, the
+> platform rescales the engine's per-frame step), and the fork features this
+> batch does not include (the fork's SpecialAction is what triggers its example,
+> and Temporal `CellSpread` is a separate fork feature).
 
 ### Armed engineers
 
