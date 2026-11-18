@@ -36,6 +36,7 @@ cat > "$probe_src" <<'EOF'
 #include <cstdio>
 
 #define SHOW(type) printf("sizeof(%s) = 0x%X\n", #type, static_cast<unsigned>(sizeof(type)))
+#define SHOW_OFF(type, field) printf("offsetof(%s, %s) = 0x%X\n", #type, #field, static_cast<unsigned>(offsetof(type, field)))
 
 int __cdecl main()
 {
@@ -51,6 +52,7 @@ int __cdecl main()
 	SHOW(BulletTypeClass);
 	SHOW(WeaponTypeClass);
 	SHOW(WarheadTypeClass);
+	SHOW(TemporalClass);
 	SHOW(RulesClass);
 	SHOW(ScenarioClass);
 	SHOW(CCINIClass);
@@ -61,6 +63,22 @@ int __cdecl main()
 	SHOW(INIClass::INIEntry);
 	SHOW(INIClass::INISection);
 	SHOW(EventClass);
+
+	// Fields bound by the TemporalAnySlot feature (and the platform's per-techno
+	// extension): the engine-side offsets these are pinned against are documented
+	// in docs/EngineBindings.md.
+	SHOW_OFF(TemporalClass, Owner);
+	SHOW_OFF(TemporalClass, Target);
+	SHOW_OFF(TemporalClass, NextTemporal);
+	SHOW_OFF(TemporalClass, PrevTemporal);
+	SHOW_OFF(TemporalClass, WarpRemaining);
+	SHOW_OFF(TemporalClass, WarpPerStep);
+	SHOW_OFF(TechnoClass, TemporalImUsing);
+	SHOW_OFF(TechnoClass, align_154);
+	SHOW_OFF(WeaponTypeClass, Damage);
+	SHOW_OFF(WeaponTypeClass, Warhead);
+	SHOW_OFF(WarheadTypeClass, Temporal);
+	SHOW_OFF(BulletClass, WeaponType);
 
 	SHOW(REGISTERS);
 	return 0;

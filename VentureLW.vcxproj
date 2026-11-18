@@ -47,10 +47,12 @@
     <ClCompile Include="src\Ext\ExtensionIndex.cpp" />
     <ClCompile Include="src\Ext\AbstractExt.cpp" />
     <ClCompile Include="src\Ext\ExtSave.cpp" />
+    <ClCompile Include="src\Ext\TechnoDataExt.cpp" />
     <!-- src/Features -->
     <ClCompile Include="src\Features\Example\ExampleFeature.cpp" />
     <ClCompile Include="src\Features\Example\ExampleIniDemo.cpp" />
     <ClCompile Include="src\Features\RadialIndicator\RadialIndicator.cpp" />
+    <ClCompile Include="src\Features\TemporalAnySlot\TemporalAnySlot.cpp" />
     <!-- external/YRpp/StaticInits.cpp is compiled via external\YRpp\YRpp.props -->
   </ItemGroup>
   <!-- Headers (for IDE navigation only; the build finds them via include paths). -->

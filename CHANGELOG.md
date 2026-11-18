@@ -7,6 +7,39 @@ and the project uses semantic versioning.  VentureLW keeps its own version line,
 independent of the base it was copied from (see `README.md`).  The history of the
 MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
+## [Unreleased]
+
+### Added
+
+- **Temporal warheads from any weapon slot** (`[Features] TemporalAnySlot`,
+  default on) - ported from Phobos-LWModified commit `c2341b52`.  The engine only
+  creates a techno's Temporal instance for a slot-0 `Temporal=yes` warhead and
+  then dereferences it without a null check, so a Temporal warhead from any other
+  slot (or from `AirburstWeapon` / `ShrapnelWeapon` / `ForceWeapon` / Ares
+  superweapons) crashed the game at `0x71AF4D`.  The platform creates the missing
+  instance on the first Temporal detonation (`0x4694BB`, size 6) and, on the shared
+  tail of `TemporalClass::Update` (`0x71AB08`, size 7, reached by vanilla and by
+  Ares + official Phobos alike), rescales the per-frame erase step to the weapon
+  that actually fired the warhead instead of the techno's current selection.
+  **No new INI keys (no tuning needed); no savegame change** - the recorded
+  weapon is transient per-techno state.
+- Shared per-techno platform extension `TechnoDataExt` (`src/Ext/TechnoDataExt.h`,
+  allocated in `TechnoClass::Init` and removed in the base destructor).  It is
+  the one TechnoClass extension of the platform, so every per-techno feature
+  keeps its fields there instead of declaring a competing store.
+- `docs/Fixed-or-Improved-Logics.md` section, `docs/EngineBindings.md` extension
+  and ABI notes, four new rows in `docs/HookCatalogue.md` (27 hook records,
+  25 distinct handler names), and the runtime ABI assertions the feature depends
+  on in `src/Engine/EngineCompat.h`.
+
+### Changed
+
+- The base **Example** module no longer owns a feature-level `UnitClass`
+  extension store: a game object carries exactly one platform extension, and the
+  new shared `TechnoDataExt` extends every techno (units included).  The module
+  keeps its hooks, switch and logging as the smoke test, and the extension /
+  savegame machinery stays covered by the shared store and the test suite.
+
 ## [0.1.0] - 2026-11-14
 
 First build of the VentureLW platform, bootstrapped from the MIT-licensed

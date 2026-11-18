@@ -18,6 +18,12 @@
   features and of the fork's additions.
 - **Radial indicator large-range drawing** - original fork implementation
   `41bc10fe` (docs `1865743c`, 2026-10-24), ported to VentureLW 2026-11-14.
+- **Temporal warheads from any weapon slot** - original fork implementation
+  `c2341b52` (2026-09-22), ported to VentureLW 2026-11-18.  The platform version
+  does not reuse the fork's injection points: `0x71AB10` belongs to a co-loaded
+  official Phobos, and Ares replaces the middle of `TemporalClass::Update`, so the
+  platform creates the missing Temporal instance at the detonation site and
+  rescales the warp step on the update tail that both hosts share.
 
 ## Pending attribution (not in this build yet)
 

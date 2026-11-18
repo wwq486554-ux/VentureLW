@@ -2,18 +2,26 @@
 // Example feature: UnitClass counter
 //
 // The smallest complete feature module, meant to be copied when adding a real
-// feature. It demonstrates the whole contract:
+// feature.  It demonstrates the feature contract:
 //   * one FeatureDescriptor registered at load time (VENTURE_REGISTER_FEATURE);
-//   * one extension class derived from the platform's extension hierarchy
-//     (UnitExt) plus a typed ExtensionStore;
 //   * its own engine hooks, gated on the feature switch;
-//   * a switch in <Platform>.ini: [Features] Example=yes|no (default: on) -
-//     the INI key is descriptor.iniKey, the internal id stays example_unit_counter;
-//   * lifecycle handling: allocated on ctor, destroyed on dtor, wiped on
-//     scenario clear.
+//   * a switch in <Platform>.ini: [Features] Example=yes|no (default: on) - the
+//     INI key is descriptor.iniKey, the internal id stays example_unit_counter;
+//   * sampling-based logging (see docs/Logging.md).
 //
 // It has no gameplay effect: it only counts UnitClass objects and logs the
 // transitions, which makes it a good smoke test for the base.
+//
+// Platform note (VentureLW, R2): this module used to also demonstrate a
+// feature-owned extension store (ExampleUnitExt : UnitExt).  A game object can
+// carry only ONE platform extension (docs/EngineBindings.md, "Extension model"),
+// and VentureLW's real per-techno features keep their state in the shared
+// TechnoDataExt (src/Ext/TechnoDataExt.h) that extends every techno - including
+// units.  Two competing stores for the same owner would make the second
+// allocation fail, so the example dropped its UnitClass store and now counts via
+// its ctor/dtor hooks only.  The extension-store machinery itself (shared
+// TechnoDataExt, savegame trailer, scenario clear) is still exercised by the
+// platform and covered by the engine-free test suite.
 // ---------------------------------------------------------------------------
 
 #include "Features/Example/ExampleFeature.h"
@@ -21,10 +29,6 @@
 #include "Core/Log.h"
 #include "Core/LogPolicy.h"
 #include "Engine/EngineCompat.h"
-#include "Ext/ExtHierarchy.h"
-#include "Ext/ExtensionIndex.h"
-#include "Ext/ExtStream.h"
-#include "Ext/ExtensionStore.h"
 
 #include <platform/Feature.h>
 
@@ -37,7 +41,6 @@ bool g_enabled = false;
 
 int g_created = 0;
 int g_destroyed = 0;
-int g_baseViews = 0;
 
 // Per-unit transitions are DEBUG lines; every kProgressLogEvery-th unit also
 // gets one INFO progress line, so a default (info) log still shows the smoke
@@ -45,95 +48,32 @@ int g_baseViews = 0;
 // ShouldLogSample() treats 0 as "no sampling" (log every unit).
 constexpr unsigned kProgressLogEvery = 100;
 
-// The example extension derives from the base hierarchy, so feature code can be
-// written against `UnitExt::Fetch(unit)` / `TechnoExt::Fetch(techno)` exactly like
-// the code the platform is meant to host.  The type-id pair is what makes the
-// base-class views validate (there is no RTTI in this build).
-class ExampleUnitExt final : public UnitExt
+unsigned PtrOf(const void* const pointer)
 {
-public:
-	static constexpr std::uint32_t TypeId = 0x0101u;
-	static constexpr std::uint32_t BaseTypeId = UnitExt::TypeId;
-
-	explicit ExampleUnitExt(AbstractClass* const owner) : UnitExt(owner) {}
-
-	std::uint32_t ExtTypeId() const override { return TypeId; }
-
-	// A tiny piece of state, so a save/load round trip is observable in the log
-	// ("restored N extensions").  A real feature stores its gameplay data here.
-	std::uint32_t Serial = 0;
-
-	void Save(ExtStreamWriter& stream) const override
-	{
-		stream.WriteU32(Serial);
-	}
-
-	void Load(ExtStreamReader& stream) override
-	{
-		stream.ReadU32(Serial);
-	}
-
-	static ExampleUnitExt* Fetch(const UnitClass* const pUnit)
-	{
-		return FetchExtAs<ExampleUnitExt>(pUnit);
-	}
-};
-
-using ExampleStore = ExtensionStore<UnitClass, ExampleUnitExt>;
-
-ExampleStore& Store()
-{
-	return ExampleStore::Instance();
+	return static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(pointer));
 }
 
 void __cdecl Initialize(const FeatureContext& context)
 {
 	(void)context;
-	Store().SetName("UnitClass/ExampleUnitExt");
-	// Persist the extension across a save/load cycle (the savegame
-	// trailer).  The store's row layout is version 1.
-	Store().SetSaveable(true, 1);
-	Log::Info("[Example] initialized (enabled=%d, store=%zu)", g_enabled ? 1 : 0, Store().Size());
+	Log::Info("[Example] initialized (enabled=%d, created=%d, destroyed=%d)", g_enabled ? 1 : 0,
+		g_created, g_destroyed);
 }
-}
+} // namespace
 
 void OnUnitCreated(UnitClass* const pUnit)
 {
 	if (!g_enabled || !pUnit)
 		return;
 
-	if (Store().Fetch(pUnit) != nullptr)
-		return;
-
-	ExampleUnitExt* const pExt = Store().Allocate(pUnit);
-	if (!pExt)
-	{
-		// While a savegame is loading the allocation is deferred: the trailer may
-		// restore this unit's extension, and the post-load step fills in the rest.
-		if (ExtensionIndex::Instance().IsLoadingSaveGame())
-			return;
-
-		// Another store already claimed this owner: composition error, see
-		// ExtensionIndex::Attach.
-		Log::Warn("[Example] UnitClass 0x%08X already has an extension of another store",
-			static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(pUnit)));
-		return;
-	}
-
-	pExt->Serial = static_cast<std::uint32_t>(++g_created);
-
-	// Prove the base-class view reaches the very same instance.
-	if (UnitExt::Fetch(pUnit) == pExt && FootExt::Fetch(pUnit) == pExt && TechnoExt::Fetch(pUnit) == pExt)
-		++g_baseViews;
+	++g_created;
 
 	// The per-unit transition is a debug detail; the sampled INFO line keeps the
 	// smoke test result visible at the default level.
-	Log::Debug("[Example] UnitClass 0x%08X created (live=%zu, created=%d, serial=%u)",
-		static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(pUnit)), Store().Size(), g_created,
-		static_cast<unsigned>(pExt->Serial));
+	Log::Debug("[Example] UnitClass 0x%08X created (created=%d)", PtrOf(pUnit), g_created);
 
 	if (ShouldLogSample(static_cast<unsigned>(g_created), kProgressLogEvery))
-		Log::Info("[Example] progress: %d created (live=%zu)", g_created, Store().Size());
+		Log::Info("[Example] progress: %d created", g_created);
 }
 
 void OnUnitDestroyed(UnitClass* const pUnit)
@@ -141,26 +81,16 @@ void OnUnitDestroyed(UnitClass* const pUnit)
 	if (!pUnit)
 		return;
 
-	// Remove even when the feature is currently switched off: the unit may have
+	// Count even when the feature is currently switched off: the unit may have
 	// been created while the feature was on.
-	if (Store().Fetch(pUnit) == nullptr)
-		return;
-
-	Store().Remove(pUnit);
 	++g_destroyed;
 
-	Log::Debug("[Example] UnitClass 0x%08X destroyed (live=%zu, destroyed=%d)",
-		static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(pUnit)), Store().Size(), g_destroyed);
+	Log::Debug("[Example] UnitClass 0x%08X destroyed (destroyed=%d)", PtrOf(pUnit), g_destroyed);
 
 	if (ShouldLogSample(static_cast<unsigned>(g_destroyed), kProgressLogEvery))
-		Log::Info("[Example] progress: %d destroyed (live=%zu)", g_destroyed, Store().Size());
-
-	// Scenario teardown destroys the live units; when the last tracked unit is
-	// gone the totals are worth one INFO line even below the sampling interval.
-	if (Store().Size() == 0)
-		Log::Info("[Example] no units left (created=%d, destroyed=%d)", g_created, g_destroyed);
+		Log::Info("[Example] progress: %d destroyed", g_destroyed);
 }
-}
+} // namespace venture::features::example
 
 // --- feature registration --------------------------------------------------
 namespace venture::features::example
@@ -176,13 +106,13 @@ const FeatureDescriptor kDescriptor{
 	&g_enabled,
 	&Initialize,
 };
-}
+} // namespace
 
 VENTURE_REGISTER_FEATURE(kDescriptor);
-}
+} // namespace venture::features::example
 
 // --- hooks -----------------------------------------------------------------
-// UnitClass ctor: allocate the example extension.
+// UnitClass ctor: count the unit.
 DEFINE_HOOK(0x7353D3, Venture_Example_UnitClass_CTOR, 0x7)
 {
 	GET(UnitClass*, pItem, ESI);
@@ -190,7 +120,7 @@ DEFINE_HOOK(0x7353D3, Venture_Example_UnitClass_CTOR, 0x7)
 	return 0;
 }
 
-// UnitClass dtor (two call sites): remove the example extension.
+// UnitClass dtor (two call sites): count the unit.
 DEFINE_HOOK_AGAIN(0x7359DA, Venture_Example_UnitClass_DTOR, 0x9)
 DEFINE_HOOK(0x735967, Venture_Example_UnitClass_DTOR, 0x9)
 {

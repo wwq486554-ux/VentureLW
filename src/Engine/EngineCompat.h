@@ -39,6 +39,29 @@ static_assert(sizeof(BulletTypeClass) == 0x2F8, "BulletTypeClass ABI changed - r
 static_assert(sizeof(UnitTypeClass) == 0xE78, "UnitTypeClass ABI changed - re-check the YRpp pin");
 static_assert(sizeof(WeaponTypeClass) == 0x160, "WeaponTypeClass ABI changed - re-check the YRpp pin");
 
+// Temporal binding (TemporalAnySlot feature + the shared per-techno extension):
+// the platform creates the TemporalClass instance the engine dereferences
+// without a null check at 0x4694BB and corrects the per-frame warp step on the
+// live instance at the shared 0x71AB08 tail, so the TemporalClass layout and the
+// techno fields it reaches are part of the binding.  The expected offsets are the
+// ones the engine itself uses; they were measured with scripts/linux/abi_probe.sh
+// and cross-checked against .analysis/gamemd/gamemd_full.asm.
+static_assert(sizeof(TemporalClass) == 0x50, "TemporalClass ABI changed - re-check the YRpp pin");
+static_assert(offsetof(TemporalClass, Owner) == 0x24, "TemporalClass::Owner moved - re-check the YRpp pin");
+static_assert(offsetof(TemporalClass, Target) == 0x28, "TemporalClass::Target moved - re-check the YRpp pin");
+static_assert(offsetof(TemporalClass, NextTemporal) == 0x40, "TemporalClass::NextTemporal moved - re-check the YRpp pin");
+static_assert(offsetof(TemporalClass, PrevTemporal) == 0x44, "TemporalClass::PrevTemporal moved - re-check the YRpp pin");
+static_assert(offsetof(TemporalClass, WarpRemaining) == 0x48, "TemporalClass::WarpRemaining moved - re-check the YRpp pin");
+static_assert(offsetof(TemporalClass, WarpPerStep) == 0x4C, "TemporalClass::WarpPerStep moved - re-check the YRpp pin");
+static_assert(offsetof(TechnoClass, TemporalImUsing) == 0x274, "TechnoClass::TemporalImUsing moved - re-check the YRpp pin");
+// The dword Ares uses for its own techno extension pointer (its WeaponIndex_Warp
+// byte lives at +0x0A inside that extension).
+static_assert(offsetof(TechnoClass, align_154) == 0x154, "TechnoClass::align_154 moved - re-check the YRpp pin");
+static_assert(offsetof(WeaponTypeClass, Damage) == 0xA4, "WeaponTypeClass::Damage moved - re-check the YRpp pin");
+static_assert(offsetof(WeaponTypeClass, Warhead) == 0xAC, "WeaponTypeClass::Warhead moved - re-check the YRpp pin");
+static_assert(offsetof(WarheadTypeClass, Temporal) == 0x15A, "WarheadTypeClass::Temporal moved - re-check the YRpp pin");
+static_assert(offsetof(BulletClass, WeaponType) == 0x130, "BulletClass::WeaponType moved - re-check the YRpp pin");
+
 // INI layer: the platform walks the engine's parsed INI objects (rules-INI
 // takeover), so the container layouts are part of the binding.
 static_assert(sizeof(INIClass) == 0x40, "INIClass ABI changed - re-check the YRpp pin");

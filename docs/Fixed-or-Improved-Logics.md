@@ -24,3 +24,50 @@
 - No new INI keys.
 
 > Ported from Phobos-LWModified (commits `41bc10fe` / `1865743c`, 2026-10-24).
+
+### Temporal warheads from any weapon slot
+
+- The engine creates a techno's Temporal instance (`TechnoClass::TemporalImUsing`)
+  once, in `TechnoClass::Init`, and only when the warhead in **weapon slot 0** is
+  `Temporal=yes`.  When a Temporal warhead arrives from any other weapon - another
+  slot, an `AirburstWeapon`, a `ShrapnelWeapon`, a `ForceWeapon`, an Ares
+  superweapon - the detonation path at `0x4694BB` dereferences that missing
+  instance without a null check and the game crashes at `0x71AF4D` (a crash the
+  community already documents as a known vanilla one).
+- VentureLW now creates the instance on the first Temporal detonation
+  (`0x4694BB`, size 6, right before the engine's `TemporalClass::Fire` call).  One
+  hook covers every delivery path; the stolen load is replayed with the owner
+  register untouched, so the engine's own call picks the new instance up.  A
+  techno whose slot 0 is already Temporal (the vanilla Chrono Legionnaire / Chrono
+  Tank) has the instance from init and is not touched at all.
+- A second vanilla defect becomes visible once the crash is gone: the erase rate
+  of a running warp is derived from the techno's **current** weapon selection, not
+  from the weapon that delivered the warhead.  After a forced-slot / any-slot shot
+  the selection has already been released, so a 1000-damage Temporal weapon erases
+  at a 20-damage weapon's speed (105 frames instead of 3 in the recorded case).
+  VentureLW remembers the weapon that delivered the warhead (transient per-techno
+  state, never saved) and, on the shared tail of `TemporalClass::Update`
+  (`0x71AB08`, size 7 - reached by the vanilla continue path and by Ares'
+  `TemporalClass_UpdateA` alike), rescales the frame's engine step to that weapon's
+  `Damage`.  The step the engine computed is reused, so the multipliers of a
+  co-loaded official Phobos (`Temporal.ApplyMultiplier` and friends) keep their
+  effect; only the `Damage` is corrected.
+- The correction is skipped when the engine-selected weapon already carries a
+  Temporal warhead, so plain Chrono Legionnaire / Chrono Tank behaviour and Ares'
+  `WeaponIndex_Warp` usage are unchanged.  Known boundary: the correction is
+  proportional, so warhead-level factors of the engine-selected weapon (rather
+  than of the fired one) keep their own contribution - unlike the fork, which
+  replaces weapon and warhead together.  The erase rate still follows the fired
+  weapon's `Damage`, which is what this fix is about.
+- Deterministic: detonation is part of the synchronised simulation and the
+  Temporal constructor draws no random numbers, so every machine creates the same
+  instance on the same frame and computes the same rate.  Multiplayer sync is
+  unaffected.
+- No new INI keys; the whole module is the `[Features] TemporalAnySlot` switch
+  (default on).
+
+> Ported from Phobos-LWModified (commit `c2341b52`, 2026-09-22).  The injection
+> points are different: the fork reimplements the engine's
+> `TemporalClass::GetWarpPerStep` because it owns that function, while the
+> platform leaves `0x71AB10` to a co-loaded official Phobos and corrects the
+> result at the update tail both hosts share.

@@ -159,6 +159,7 @@ truth, and the build fails if a size moves):
 | `BulletTypeClass` | 0x2F8 |
 | `UnitTypeClass` | 0xE78 |
 | `WeaponTypeClass` | 0x160 |
+| `TemporalClass` | 0x50 |
 | `INIClass` | 0x40 |
 | `CCINIClass` | 0x58 |
 | `INIClass::INIEntry` | 0x28 |
@@ -181,9 +182,14 @@ toolchain lock like the build and the other probes.
 The probe **only prints** - it has no assertions, and its exit status does not
 depend on the printed values.  It is a measurement/reporting aid, not a gate:
 comparing its output with the table above (and, when in doubt, with the target
-executable) is a manual step.  The 16 `static_assert`s in `EngineCompat.h` are
+executable) is a manual step.  The 29 `static_assert`s in `EngineCompat.h` are
 compile-time checks against YRpp's declared layout plus the 32-bit build and the
 Syringe `REGISTERS` size; they do not verify the loaded executable.
+Besides the sizes above, `EngineCompat.h` pins the field offsets the platform
+reads directly (the `TemporalClass` chain fields and `TechnoClass::align_154`
+for the TemporalAnySlot feature; the engine-side expected values are documented
+in `docs/Fixed-or-Improved-Logics.md` and were cross-checked against the
+disassembly).  They are measured with `scripts/linux/abi_probe.sh`.
 
 ## Rules / art INI binding
 
@@ -255,6 +261,15 @@ derived platform drop a module without touching engine class layouts.
   owner class.  This mirrors the call shape of the Phobos-style code the platform
   is meant to host (`UnitExt::Fetch(unit)`, `TechnoExt::Fetch(techno)`) without
   reusing its pointer-slot / container implementation.
+* **One class per owner kind, shared by features.**  The platform-level
+  `TechnoDataExt` (`src/Ext/TechnoDataExt.h`) carries the per-techno state of
+  every feature (today: the weapon that delivered a Temporal warhead; later
+  batches add the ROF-curve chain state).  A feature must **not**
+  declare its own TechnoClass extension store: the second store could not claim
+  an owner that already has the shared extension.  The base's Example module was
+  re-pointed accordingly: its feature-owned `UnitClass` store is gone and the
+  module now only counts units (the shared extension and the savegame trailer
+  keep the storage machinery exercised).
 * **Hierarchy + runtime type ids.**  `AbstractExt` is the root;
   `src/Ext/ExtHierarchy.h` declares the `TechnoExt -> FootExt -> UnitExt`
   skeleton, and a platform's extension class derives from one of them.  Every
@@ -313,8 +328,10 @@ never deletes them itself.
 
 | Engine event | Hook | Effect |
 | --- | --- | --- |
-| `UnitClass` constructed | `Venture_Example_UnitClass_CTOR` (0x7353D3) | Example store `Allocate`s the `ExampleUnitExt` instance (type id 0x0101, base `UnitExt`); index `Attach`es it, so `UnitExt` / `FootExt` / `TechnoExt` views reach the same instance |
-| `UnitClass` destroyed (two sites) | `Venture_Example_UnitClass_DTOR` (0x735967, 0x7359DA) | Example store `Remove`s the extension; index `Detach`es it |
+| `UnitClass` constructed | `Venture_Example_UnitClass_CTOR` (0x7353D3) | Example smoke test counts the unit (this module no longer owns a `UnitClass` extension, see the shared-extension bullet above) |
+| `UnitClass` destroyed (two sites) | `Venture_Example_UnitClass_DTOR` (0x735967, 0x7359DA) | Example smoke test counts the destroyed unit |
+| `TechnoClass` initialized | `Venture_TechnoData_Init` (0x6F42E3) | allocates the shared `TechnoDataExt` for every techno - all four concrete techno classes funnel through `TechnoClass::Init`; the 7-byte free site keeps the platform's 5-byte hook-window rule (the official Phobos alpha2 owns the 2-byte tail at 0x6F42F7) |
+| `TechnoClass` destroyed | `Venture_TechnoData_DTOR` (0x6F4500) | removes that extension at the `TechnoClass` base destructor, where all four concrete destructors chain in; one of the five-platform framework addresses (the audited handlers at it return 0) |
 | scenario teardown | `Venture_ScenarioClear` (0x685659) | `ExtensionIndex::ClearAll()` - every registered store clears itself, then the index is cleared |
 | pointer invalidated | `Venture_AnnounceInvalidPointer` (0x7258D0) | `ExtensionIndex::NotifyInvalidPointer()` - increments a diagnostic counter and drops a deferred allocation recorded for the invalidated owner; it does **not** delete extensions (removal stays owned by the destructor hook) and there is **no subscriber/log API** yet, so a feature cannot register a pointer-keyed cache on it today |
 

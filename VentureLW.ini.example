@@ -124,6 +124,14 @@ ExampleIniKey=yes
 ; switch is the whole configuration.  See docs/Fixed-or-Improved-Logics.md.
 RadialIndicator=yes
 
+; Temporal warheads from any weapon slot (id: temporal_any_slot): create the
+; techno's Temporal instance when a Temporal warhead arrives from a weapon the
+; engine did not create one for (the engine only checks weapon slot 0, and then
+; dereferences the missing instance - the known crash at 0x71AF4D), and erase a
+; running warp at the rate of the weapon that actually fired the warhead.
+; No keys of its own - this switch is the whole configuration.
+TemporalAnySlot=yes
+
 ; ---------------------------------------------------------------------------
 ; Module-owned keys
 ; ---------------------------------------------------------------------------
