@@ -30,6 +30,11 @@
   keys and the same curve, and hooks the two `Fire_At` reload sites and the two
   weapon-type INI epilogues; it reads the weapon from the `Fire_At` argument on
   the `DiskLaser=yes` branch, where the fork's EBX-based read silently missed.
+- **Armed engineers** - original fork implementation `c2341b52` (2026-09-26),
+  ported to VentureLW 2026-11-18.  The platform version keeps the same two
+  layers (attack-clamp hook + `InfantryClass::MouseOverObject` wrapper) but takes
+  the vtable slot over at run time with a chain to the previous implementation
+  instead of the fork's static VTABLE patch.
 
 ## Pending attribution (not in this build yet)
 

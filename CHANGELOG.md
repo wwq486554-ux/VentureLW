@@ -55,6 +55,24 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   per-weapon state machine are covered without a game process - the math is in
   the engine-free `src/Features/ROFCurve/ROFCurveMath.h`).
 
+- **Armed engineers** (`[Features] ArmedEngineers`, default on) - ported from
+  Phobos-LWModified commit `c2341b52`.  An `Engineer=yes` infantry that carries a
+  real weapon can attack enemy units like any other armed infantry (vanilla
+  hardcodes `Engineer && Attack -> NoMove` at `0x51E6B4`), and Ctrl force-fire on
+  a building attacks it instead of capturing it.  Without Ctrl a building click
+  keeps the vanilla capture / repair / enter actions, Ivan-bomb disarm keeps its
+  own cursor and non-engineer infantry are untouched.  Two layers: a hook at
+  `0x51E6C4` releases the engineer attack clamp, and a feature-level **vtable
+  slot takeover** of `InfantryClass::MouseOverObject` (`0x7EB0CC`, vanilla
+  `0x51E3B0`) rewrites the force-fired building result - the slot lives in
+  read-only `.rdata`, so the platform writes it through `VirtualProtect`, reads
+  the previous value after every host DLL has patched (under Ares + official
+  Phobos that is the Phobos wrapper) and chains to it.  This is the platform's
+  first vtable binding, documented in `docs/EngineBindings.md`.  **No INI keys
+  (no tuning needed); no savegame change.**  (Behaviour trade-off carried over
+  from the fork: Ctrl means attack for any building, allied included; AI attack
+  scripts still convert engineers to capture missions - manual attacks only.)
+
 ### Changed
 
 - The base **Example** module no longer owns a feature-level `UnitClass`

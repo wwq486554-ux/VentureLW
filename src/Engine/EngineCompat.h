@@ -39,6 +39,17 @@ static_assert(sizeof(BulletTypeClass) == 0x2F8, "BulletTypeClass ABI changed - r
 static_assert(sizeof(UnitTypeClass) == 0xE78, "UnitTypeClass ABI changed - re-check the YRpp pin");
 static_assert(sizeof(WeaponTypeClass) == 0x160, "WeaponTypeClass ABI changed - re-check the YRpp pin");
 
+// ArmedEngineers binding: the feature takes over the InfantryClass
+// MouseOverObject vtable slot (0x7EB0CC, read-only .rdata - the write goes
+// through VirtualProtect), chains to the previous implementation and reads the
+// engineer flag plus the owning house.  The engine reads the same fields at
+// 0x51E6B4 ([this+0x6C0]->[+0xEC3]) and elsewhere.
+static_assert(sizeof(InfantryClass) == 0x6F0, "InfantryClass ABI changed - re-check the YRpp pin");
+static_assert(sizeof(InfantryTypeClass) == 0xED0, "InfantryTypeClass ABI changed - re-check the YRpp pin");
+static_assert(offsetof(InfantryClass, Type) == 0x6C0, "InfantryClass::Type moved - re-check the YRpp pin");
+static_assert(offsetof(InfantryTypeClass, Engineer) == 0xEC3, "InfantryTypeClass::Engineer moved - re-check the YRpp pin");
+static_assert(offsetof(TechnoClass, Owner) == 0x21C, "TechnoClass::Owner moved - re-check the YRpp pin");
+
 // Temporal / ROFCurve binding (the features and the shared per-techno
 // extension): the platform creates the TemporalClass instance the engine
 // dereferences without a null check at 0x4694BB, corrects the per-frame warp

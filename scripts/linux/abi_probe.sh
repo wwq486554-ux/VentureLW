@@ -46,6 +46,8 @@ int __cdecl main()
 	SHOW(FootClass);
 	SHOW(TechnoClass);
 	SHOW(TechnoTypeClass);
+	SHOW(InfantryClass);
+	SHOW(InfantryTypeClass);
 	SHOW(UnitClass);
 	SHOW(UnitTypeClass);
 	SHOW(BulletClass);
@@ -80,6 +82,9 @@ int __cdecl main()
 	SHOW_OFF(WeaponTypeClass, ROF);
 	SHOW_OFF(WarheadTypeClass, Temporal);
 	SHOW_OFF(BulletClass, WeaponType);
+	SHOW_OFF(InfantryClass, Type);
+	SHOW_OFF(InfantryTypeClass, Engineer);
+	SHOW_OFF(TechnoClass, Owner);
 
 	SHOW(REGISTERS);
 	return 0;

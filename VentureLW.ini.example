@@ -139,6 +139,13 @@ TemporalAnySlot=yes
 ; guides/ROF曲线说明.txt.
 ROFCurve=yes
 
+; Armed engineers (id: armed_engineers): an Engineer=yes infantry that carries a
+; real weapon can attack enemy units like any other armed infantry, and Ctrl
+; force-fire on a building attacks it.  Without Ctrl, clicking a building keeps
+; the vanilla capture / repair / enter actions.  No keys of its own - this switch
+; is the whole configuration.
+ArmedEngineers=yes
+
 ; ---------------------------------------------------------------------------
 ; Module-owned keys
 ; ---------------------------------------------------------------------------

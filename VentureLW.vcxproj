@@ -49,6 +49,7 @@
     <ClCompile Include="src\Ext\ExtSave.cpp" />
     <ClCompile Include="src\Ext\TechnoDataExt.cpp" />
     <!-- src/Features -->
+    <ClCompile Include="src\Features\ArmedEngineers\ArmedEngineers.cpp" />
     <ClCompile Include="src\Features\Example\ExampleFeature.cpp" />
     <ClCompile Include="src\Features\Example\ExampleIniDemo.cpp" />
     <ClCompile Include="src\Features\RadialIndicator\RadialIndicator.cpp" />

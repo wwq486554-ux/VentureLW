@@ -71,3 +71,35 @@
 > `TemporalClass::GetWarpPerStep` because it owns that function, while the
 > platform leaves `0x71AB10` to a co-loaded official Phobos and corrects the
 > result at the update tail both hosts share.
+
+### Armed engineers
+
+- Vanilla hardcodes `if (Type->Engineer && action == Action::Attack) return
+  Action::NoMove;` at `0x51E6B4`, so an `Engineer=yes` infantry can never get an
+  attack cursor on a unit even when INI gives it a real weapon.  Force-firing a
+  building is worse: deeper in the same routine every non-allied capturable
+  building is rewritten back to `Action::Capture` (`0x51EE91` -> `0x51EEEF`), which
+  no jump inside the function can dodge.
+- VentureLW now does two things.  It releases the attack clamp at `0x51E6C4` for
+  engineers that really carry an attack weapon (the weapon the engine would use
+  against the target exists, has a warhead and is not a bomb-disarm tool), so an
+  armed engineer can right-click and Ctrl-attack enemy units like any other armed
+  infantry.  It also takes over the `InfantryClass::MouseOverObject` vtable slot
+  (`0x7EB0CC`, vanilla `0x51E3B0`) at the outermost layer and rewrites a Ctrl
+  force-fired building result to `Action::Attack`; the previous implementation is
+  called first, so a co-loaded host wrapper keeps working.
+- Behaviour: with Ctrl a building is attacked; without Ctrl a building click keeps
+  the vanilla capture / repair / enter actions; Ivan-bomb disarm keeps its own
+  cursor; an engineer without an attack weapon (or with only a bomb-disarm
+  weapon) behaves exactly as before; non-engineer infantry is not touched at all.
+- Known trade-offs (carried over from the fork): Ctrl means attack for *any*
+  building, allied ones included, and the AI attack scripts still convert
+  engineers to capture missions - this feature is about manual attacks.  Guard
+  auto-targeting stays disabled for engineers like in vanilla.
+- No new INI keys; the whole module is `[Features] ArmedEngineers` (default on).
+
+> Ported from Phobos-LWModified (commit `c2341b52`, 2026-09-26).  The fork patched
+> the vtable slot statically; the platform reads the slot after all host DLLs
+> patched, chains to the previous implementation and writes it under
+> `VirtualProtect` (the slot is in read-only `.rdata`) - see
+> `docs/EngineBindings.md`.

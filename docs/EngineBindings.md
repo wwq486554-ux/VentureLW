@@ -160,6 +160,8 @@ truth, and the build fails if a size moves):
 | `UnitTypeClass` | 0xE78 |
 | `WeaponTypeClass` | 0x160 |
 | `TemporalClass` | 0x50 |
+| `InfantryClass` | 0x6F0 |
+| `InfantryTypeClass` | 0xED0 |
 | `INIClass` | 0x40 |
 | `CCINIClass` | 0x58 |
 | `INIClass::INIEntry` | 0x28 |
@@ -187,9 +189,10 @@ compile-time checks against YRpp's declared layout plus the 32-bit build and the
 Syringe `REGISTERS` size; they do not verify the loaded executable.
 Besides the sizes above, `EngineCompat.h` pins the field offsets the platform
 reads directly: the `TemporalClass` chain fields and `TechnoClass::align_154` for
-the TemporalAnySlot feature, and the weapon fields the ROFCurve feature reads
+the TemporalAnySlot feature, the weapon fields the ROFCurve feature reads
 (`WeaponTypeClass::Damage` / `Warhead` / `ROF`, `WarheadTypeClass::Temporal`,
-`BulletClass::WeaponType`).  The engine-side expected values are documented in
+`BulletClass::WeaponType`), and the infantry fields ArmedEngineers reads
+(`InfantryClass::Type`, `InfantryTypeClass::Engineer`, `TechnoClass::Owner`).  The engine-side expected values are documented in
 `docs/Fixed-or-Improved-Logics.md` / `docs/New-or-Enhanced-Logics.md` and were
 cross-checked against the disassembly; they are measured with
 `scripts/linux/abi_probe.sh`.
@@ -226,6 +229,30 @@ so rules keys cannot be read from a feature's `Initialize()`.  The binding is:
 The INI container layouts the takeover walks are asserted in
 `src/Engine/EngineCompat.h` (`INIClass` 0x40, `CCINIClass` 0x58, `INIEntry` 0x28,
 `INISection` 0x44).
+
+## Vtable slot binding (feature level)
+
+The base installs only `.syhks00` hooks (see `docs/HookCatalogue.md`).  A feature
+may additionally need an engine **vtable slot**, which has no hook record: the
+slot is a plain function pointer in the engine image, not a code window, so it
+cannot be chained by Syringe.  ArmedEngineers is the first module that does this,
+and the pattern it follows is the platform's rule for the next ones:
+
+| Item | Value / rule |
+| --- | --- |
+| Slot | `0x7EB0CC` - `InfantryClass::MouseOverObject` (the object-cursor entry point; the vanilla target is `0x51E3B0`) |
+| Original location | read-only `.rdata` of `gamemd.exe` (`.rdata` spans `0x007E1000`-`0x00812000`), so the write must go through `VirtualProtect`; the previous protection is restored immediately |
+| Chain protocol | at feature `Initialize()` (which runs from `Venture_ExeRun`, i.e. after every other DLL applied its own patches) read the current value, keep it, install the platform wrapper; the wrapper calls the previous implementation **first** and rewrites only the result it was designed to change |
+| Calling shape | `Action __fastcall(InfantryClass* pThis, void*, ObjectClass* pTarget, bool ignoreForce)` - `this` in `ECX`, a dummy second parameter in `EDX`, the real arguments on the stack.  The vanilla function ignores the dummy; the Phobos-lineage wrappers declare the same shape, which is what makes the chain possible |
+| Load order | the platform DLL sorts after `Ares.dll` / `Kratos.dll` / `MixReader.dll` / `Phobos.dll`, so the value read at startup is the host wrapper when one exists, or the vanilla function when no host takes the slot |
+| Startup log | the module prints the slot address, the previous value and whether it was the vanilla function or a host wrapper, then whether the chain was installed |
+| Failure handling | a failed `VirtualProtect` is reported as an error and the wrapper is not installed (the feature stays inactive instead of half-installed).  If a host wrapper ever proves incompatible, `[Features] ArmedEngineers=no` leaves the slot untouched on the next start - the review record's documented rollback is to then enable the module only when the previous value is vanilla |
+| Scope | only the `InfantryClass` slot is taken over; the `UnitClass` / `AircraftClass` / `BuildingClass` `MouseOverObject` slots are untouched |
+
+A vtable takeover is not listed in `docs/HookCatalogue.md` (it is not a
+`.syhks00` hook record and `verify_build.py` compares only those records), but it
+is described here so an audit does not have to reverse-engineer it, and the
+module logs its previous value so the in-game log shows what it chained to.
 
 ## Hook timing and the feature contract
 
