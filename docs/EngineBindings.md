@@ -186,10 +186,13 @@ executable) is a manual step.  The 29 `static_assert`s in `EngineCompat.h` are
 compile-time checks against YRpp's declared layout plus the 32-bit build and the
 Syringe `REGISTERS` size; they do not verify the loaded executable.
 Besides the sizes above, `EngineCompat.h` pins the field offsets the platform
-reads directly (the `TemporalClass` chain fields and `TechnoClass::align_154`
-for the TemporalAnySlot feature; the engine-side expected values are documented
-in `docs/Fixed-or-Improved-Logics.md` and were cross-checked against the
-disassembly).  They are measured with `scripts/linux/abi_probe.sh`.
+reads directly: the `TemporalClass` chain fields and `TechnoClass::align_154` for
+the TemporalAnySlot feature, and the weapon fields the ROFCurve feature reads
+(`WeaponTypeClass::Damage` / `Warhead` / `ROF`, `WarheadTypeClass::Temporal`,
+`BulletClass::WeaponType`).  The engine-side expected values are documented in
+`docs/Fixed-or-Improved-Logics.md` / `docs/New-or-Enhanced-Logics.md` and were
+cross-checked against the disassembly; they are measured with
+`scripts/linux/abi_probe.sh`.
 
 ## Rules / art INI binding
 
@@ -263,13 +266,22 @@ derived platform drop a module without touching engine class layouts.
   reusing its pointer-slot / container implementation.
 * **One class per owner kind, shared by features.**  The platform-level
   `TechnoDataExt` (`src/Ext/TechnoDataExt.h`) carries the per-techno state of
-  every feature (today: the weapon that delivered a Temporal warhead; later
-  batches add the ROF-curve chain state).  A feature must **not**
+  every feature (today: the weapon that delivered a Temporal warhead and the
+  per-weapon ROF-curve chains).  A feature must **not**
   declare its own TechnoClass extension store: the second store could not claim
   an owner that already has the shared extension.  The base's Example module was
   re-pointed accordingly: its feature-owned `UnitClass` store is gone and the
   module now only counts units (the shared extension and the savegame trailer
   keep the storage machinery exercised).
+* **Type-level data is not an extension store.**  The engine's type objects
+  (`WeaponTypeClass` and friends) are process-lifetime configuration created when
+  the rules INI is parsed; the object stores above are cleared on scenario clear
+  by design (and the savegame load path runs that clear), so a type store would
+  lose its data after every load while the rules are not re-parsed.  A feature
+  that keeps per-type configuration (ROFCurve's seven weapon keys) therefore
+  writes it into a feature-local table keyed by the type pointer when the type's
+  INI section is read, and reads it from there on every use - no platform store,
+  no savegame state.
 * **Hierarchy + runtime type ids.**  `AbstractExt` is the root;
   `src/Ext/ExtHierarchy.h` declares the `TechnoExt -> FootExt -> UnitExt`
   skeleton, and a platform's extension class derives from one of them.  Every

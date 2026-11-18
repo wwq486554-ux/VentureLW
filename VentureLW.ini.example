@@ -20,9 +20,9 @@
 ; key name longer than 255 characters cannot be represented.  Keep values well
 ; inside these limits.
 ;
-; The platform is a starter base: this base contains no gameplay features, so
-; turning switches on or off does not change the game yet.  The [Features]
-; section exists so derived platforms have a stable place to add their switches.
+; Every feature module has exactly one switch in the [Features] section - the
+; base's Example modules and the platform's gameplay modules alike.  A missing
+; switch falls back to the module's default (on, unless documented otherwise).
 ;
 ; ---------------------------------------------------------------------------
 
@@ -131,6 +131,13 @@ RadialIndicator=yes
 ; running warp at the rate of the weapon that actually fired the warhead.
 ; No keys of its own - this switch is the whole configuration.
 TemporalAnySlot=yes
+
+; ROF curve (id: rof_curve): a weapon that writes ROFCurve=yes and ROFCurve.End
+; in its own section fires faster (or slower) the longer it keeps firing - one
+; spin-up chain per weapon.  The behaviour is opt-in per weapon, so this switch
+; only enables the module.  See docs/New-or-Enhanced-Logics.md and
+; guides/ROF曲线说明.txt.
+ROFCurve=yes
 
 ; ---------------------------------------------------------------------------
 ; Module-owned keys

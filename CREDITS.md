@@ -24,6 +24,12 @@
   official Phobos, and Ares replaces the middle of `TemporalClass::Update`, so the
   platform creates the missing Temporal instance at the detonation site and
   rescales the warp step on the update tail that both hosts share.
+- **ROF curve (weapon-level spin-up)** - original fork implementation
+  `47023891` / `b950ac50`, per-weapon chains `6c54bd6f` (2026-10), ported to
+  VentureLW 2026-11-18.  The platform version keeps the same seven `ROFCurve.*`
+  keys and the same curve, and hooks the two `Fire_At` reload sites and the two
+  weapon-type INI epilogues; it reads the weapon from the `Fire_At` argument on
+  the `DiskLaser=yes` branch, where the fork's EBX-based read silently missed.
 
 ## Pending attribution (not in this build yet)
 

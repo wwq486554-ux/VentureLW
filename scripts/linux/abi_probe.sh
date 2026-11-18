@@ -77,6 +77,7 @@ int __cdecl main()
 	SHOW_OFF(TechnoClass, align_154);
 	SHOW_OFF(WeaponTypeClass, Damage);
 	SHOW_OFF(WeaponTypeClass, Warhead);
+	SHOW_OFF(WeaponTypeClass, ROF);
 	SHOW_OFF(WarheadTypeClass, Temporal);
 	SHOW_OFF(BulletClass, WeaponType);
 

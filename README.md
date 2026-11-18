@@ -8,7 +8,8 @@ ported from the **Phobos-LWModified** fork.
 > **Status: v0.1.0 (bootstrap, 2026-11-14)** - the first build of the platform:
 > the identity was renamed from the base, the platform has its own savegame
 > trailer id, and the first gameplay feature has been migrated (large-range
-> radial indicator drawing).  It is not a feature-complete mod yet.
+> radial indicator drawing, Temporal warheads from any weapon slot, the ROF
+> curve).  It is not a feature-complete mod yet.
 
 ## What this platform provides
 
@@ -23,6 +24,8 @@ Feature modules (`src/Features/`), registered as one `[Features]` switch each:
 | Module | Switch | What it does |
 | --- | --- | --- |
 | `RadialIndicator` | `[Features] RadialIndicator` (default on) | Draws the radial indicator's two concentric ellipse outlines with double-precision scan lines once the engine's 32-bit ellipse rasterizer would overflow, so selected-unit / placement-preview / superweapon-targeting rings stay visible at long ranges instead of disappearing.  Rendering only; no INI keys, no savegame change.  See `docs/Fixed-or-Improved-Logics.md`. |
+| `TemporalAnySlot` | `[Features] TemporalAnySlot` (default on) | Creates the techno's Temporal instance when a Temporal warhead arrives from a weapon the engine did not create one for (the engine only checks weapon slot 0 and then dereferences the missing instance - the known vanilla crash at `0x71AF4D`), and erases a running warp at the rate of the weapon that actually fired the warhead.  No INI keys, no savegame change.  See `docs/Fixed-or-Improved-Logics.md`. |
+| `ROFCurve` | `[Features] ROFCurve` (default on, the behaviour itself is opt-in per weapon) | Weapon-level spin-up: with `ROFCurve=yes` and `ROFCurve.End` in a weapon section, that weapon fires faster (or slower) the longer it keeps firing; one chain per weapon, so a techno's weapons never reset each other's progress.  Seven `ROFCurve.*` weapon keys, no savegame change.  See `docs/New-or-Enhanced-Logics.md` and `guides/ROF曲线说明.txt`. |
 
 The stock `Example` / `ExampleIniKey` modules of the base are kept: they have no
 gameplay effect and serve as the base's own smoke tests.

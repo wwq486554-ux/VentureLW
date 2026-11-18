@@ -32,6 +32,29 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   25 distinct handler names), and the runtime ABI assertions the feature depends
   on in `src/Engine/EngineCompat.h`.
 
+- **ROF curve** (`[Features] ROFCurve`, default on; the behaviour itself is
+  opt-in per weapon) - ported from Phobos-LWModified commits `47023891` /
+  `b950ac50` (the curve) and `6c54bd6f` (one chain per weapon).  A weapon that
+  writes `ROFCurve=yes` and `ROFCurve.End` in its own rules section fires faster
+  (or slower) the longer it keeps firing: `Start` -> `End` over `Ramp` frames,
+  eased by `Power`, falling back over `Decay` after a pause and restarting at the
+  top with `Cycle`.  Only the interval between two shots changes; the curve is
+  applied as a ratio to the delay the engine computed, so AttachEffect ROF
+  multipliers, veterancy and `ROF.RandomDelay` keep working.  Every weapon keeps
+  its own spin-up chain (a multi-weapon techno's weapons never reset each other),
+  the chains are transient (never saved), and the module hooks the two
+  `Fire_At` reload sites (`0x6FF2AA` / `0x6FE4B0`) plus the two weapon-type INI
+  epilogues (`0x7729B0` / `0x7729C7`, chained with a co-loaded official Phobos /
+  Ares).  Unlike the fork, the `DiskLaser=yes` branch is handled correctly (the
+  platform reads the weapon from the `Fire_At` argument instead of the register
+  that holds the `DiskLaserClass*` on that branch).  **No savegame change.**
+  See `docs/New-or-Enhanced-Logics.md` and `guides/ROF曲线说明.txt`.
+- `docs/New-or-Enhanced-Logics.md` (first "new logic" document of the platform),
+  the Chinese tuning guide `guides/ROF曲线说明.txt`, and
+  `tests/test_rof_curve.cpp` (17 test programs now; the curve shape and the
+  per-weapon state machine are covered without a game process - the math is in
+  the engine-free `src/Features/ROFCurve/ROFCurveMath.h`).
+
 ### Changed
 
 - The base **Example** module no longer owns a feature-level `UnitClass`

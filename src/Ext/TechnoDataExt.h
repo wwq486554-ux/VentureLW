@@ -20,12 +20,23 @@
 //     the erase rate of a running warp from the techno's *current* weapon
 //     selection, which is not necessarily the weapon that fired; this records
 //     the real one (see src/Features/TemporalAnySlot/TemporalAnySlot.cpp).
+//   * ROFCurveChains - ROFCurve feature: one spin-up chain per weapon the techno
+//     has fired with a usable curve.  Transient, per weapon, deliberately not
+//     serialized (see src/Features/ROFCurve/ROFCurveMath.h).
+//
+// The class must know the state types of the features that keep fields here (it
+// is the composition point), so it includes the ROFCurve math header; that
+// header stays engine-free, which keeps the feature's unit test free of engine
+// headers as well.
 // ---------------------------------------------------------------------------
 
 #include <cstdint>
+#include <vector>
 
 #include "Ext/ExtensionStore.h"
 #include "Ext/ExtHierarchy.h"
+
+#include "Features/ROFCurve/ROFCurveMath.h"
 
 class TechnoClass;
 class WeaponTypeClass;
@@ -47,6 +58,9 @@ public:
 
 	// Last Temporal warhead weapon that hit through this techno (transient).
 	WeaponTypeClass* TemporalWarpWeapon = nullptr;
+
+	// ROF curve spin-up state, one chain per weapon (transient).
+	std::vector<features::rof_curve::ROFCurveChain> ROFCurveChains;
 
 	static TechnoDataExt* Fetch(const AbstractClass* const owner)
 	{
