@@ -2,9 +2,8 @@
 
 VentureLW was bootstrapped by **copying** the MIT-licensed
 [VentureCore](https://github.com/wwq486554-ux/VentureCore) starter base and
-re-applying the platform identity (method A in the project notes).  The base
-stays a separate repository; this directory keeps the copy relationship
-reviewable.
+re-applying the platform identity.  The base stays a separate repository; this
+directory keeps the copy relationship reviewable.
 
 ## Files
 
