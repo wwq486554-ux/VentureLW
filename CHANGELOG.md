@@ -22,11 +22,9 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   Ares + official Phobos alike), rescales the per-frame erase step to the weapon
   that actually fired the warhead instead of the techno's current selection.
   **No new INI keys (no tuning needed); no savegame change** - the recorded
-  weapon is transient per-techno state.  The Chinese guide
-  `guides/Temporal武器任意武器槽说明.txt` documents both versions side by side:
-  the fork's `[General] TemporalWeapon.AnySlot` key versus the platform's
-  zero-key `[Features] TemporalAnySlot` switch, and the difference in how the
-  erase rate is corrected.
+  weapon is transient per-techno state.  (Unlike the fork, the platform has no
+  `[General] TemporalWeapon.AnySlot` key: the module switch replaces it, and the
+  erase-rate correction works differently - see `docs/Fixed-or-Improved-Logics.md`.)
 - Shared per-techno platform extension `TechnoDataExt` (`src/Ext/TechnoDataExt.h`,
   allocated in `TechnoClass::Init` and removed in the base destructor).  It is
   the one TechnoClass extension of the platform, so every per-techno feature
@@ -52,11 +50,12 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   Ares).  Unlike the fork, the `DiskLaser=yes` branch is handled correctly (the
   platform reads the weapon from the `Fire_At` argument instead of the register
   that holds the `DiskLaserClass*` on that branch).  **No savegame change.**
-  See `docs/New-or-Enhanced-Logics.md` and `guides/ROF曲线说明.txt` (written as
-  two versions - Phobos-LWModified and VentureLW - because the switch, the
-  cooldown-driving combinations and the `DiskLaser=yes` branch differ).
-- `docs/New-or-Enhanced-Logics.md` (first "new logic" document of the platform),
-  the Chinese tuning guide `guides/ROF曲线说明.txt`, and
+  See `docs/New-or-Enhanced-Logics.md` - the platform's first bilingual
+  (English + 中文) feature document, including a section on how this version
+  differs from the Phobos-LWModified one (switch, cooldown consumers,
+  `DiskLaser=yes` branch, savegame, log).
+- `docs/New-or-Enhanced-Logics.md` (first "new logic" document of the platform,
+  written as **English + complete Chinese translation** in the same file) and
   `tests/test_rof_curve.cpp` (17 test programs now; the curve shape and the
   per-weapon state machine are covered without a game process - the math is in
   the engine-free `src/Features/ROFCurve/ROFCurveMath.h`).

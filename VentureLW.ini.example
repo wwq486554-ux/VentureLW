@@ -135,8 +135,8 @@ TemporalAnySlot=yes
 ; ROF curve (id: rof_curve): a weapon that writes ROFCurve=yes and ROFCurve.End
 ; in its own section fires faster (or slower) the longer it keeps firing - one
 ; spin-up chain per weapon.  The behaviour is opt-in per weapon, so this switch
-; only enables the module.  See docs/New-or-Enhanced-Logics.md and
-; guides/ROF曲线说明.txt.
+; only enables the module.  See docs/New-or-Enhanced-Logics.md
+; (English + 中英对照).
 ROFCurve=yes
 
 ; Armed engineers (id: armed_engineers): an Engineer=yes infantry that carries a
