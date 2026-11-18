@@ -55,6 +55,9 @@
     <ClCompile Include="src\Features\RadialIndicator\RadialIndicator.cpp" />
     <ClCompile Include="src\Features\ROFCurve\ROFCurveFeature.cpp" />
     <ClCompile Include="src\Features\TemporalAnySlot\TemporalAnySlot.cpp" />
+    <ClCompile Include="src\Features\ViewZoom\Hooks.ViewZoom.cpp" />
+    <ClCompile Include="src\Features\ViewZoom\ViewZoom.cpp" />
+    <ClCompile Include="src\Features\ViewZoom\ViewZoomFeature.cpp" />
     <!-- external/YRpp/StaticInits.cpp is compiled via external\YRpp\YRpp.props -->
   </ItemGroup>
   <!-- Headers (for IDE navigation only; the build finds them via include paths). -->
@@ -89,6 +92,9 @@
     <ClInclude Include="src\Core\IniTakeover.h" />
     <ClInclude Include="src\Event\EventChannel.h" />
     <ClInclude Include="src\Command\Commands.h" />
+    <ClInclude Include="src\Features\ViewZoom\ViewZoom.h" />
+    <ClInclude Include="src\Features\ViewZoom\ViewZoomFeature.h" />
+    <ClInclude Include="src\Features\ViewZoom\ViewZoomLevels.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

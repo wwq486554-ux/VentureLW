@@ -2,8 +2,8 @@
 // ArmedEngineers feature: an engineer that carries a real weapon can attack.
 //
 // Ported from Phobos-LWModified (the fork's A10 batch, commit c2341b52; its
-// behaviour matrix was verified in game on 2026-09-26, see
-// Waterline/已实现/一期/工程师武器攻击功能实现记录.md §4-§6).  Vanilla hardcodes
+// behaviour matrix was verified in game on 2026-09-26; the fork's internal
+// implementation record holds the full matrix).  Vanilla hardcodes
 // `if (Type->Engineer && action == Action::Attack) return Action::NoMove;`
 // (0x51E6B4) so an armed engineer can never get an attack cursor on a unit, and
 // deeper in the general path every non-allied capturable building is rewritten

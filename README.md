@@ -7,9 +7,10 @@ ported from the **Phobos-LWModified** fork.
 
 > **Status: v0.1.0 (bootstrap, 2026-11-14)** - the first build of the platform:
 > the identity was renamed from the base, the platform has its own savegame
-> trailer id, and the first gameplay feature has been migrated (large-range
+> trailer id, and the first gameplay features have been migrated (large-range
 > radial indicator drawing, Temporal warheads from any weapon slot, the ROF
-> curve).  It is not a feature-complete mod yet.
+> curve, armed engineers and the tactical view zoom).  It is not a
+> feature-complete mod yet.
 
 ## What this platform provides
 
@@ -27,6 +28,7 @@ Feature modules (`src/Features/`), registered as one `[Features]` switch each:
 | `TemporalAnySlot` | `[Features] TemporalAnySlot` (default on) | Creates the techno's Temporal instance when a Temporal warhead arrives from a weapon the engine did not create one for (the engine only checks weapon slot 0 and then dereferences the missing instance - the known vanilla crash at `0x71AF4D`), and erases a running warp at the rate of the weapon that actually fired the warhead.  No INI keys, no savegame change.  See `docs/Fixed-or-Improved-Logics.md`. |
 | `ArmedEngineers` | `[Features] ArmedEngineers` (default on) | An `Engineer=yes` infantry that carries a real weapon can attack enemy units like any other armed infantry, and Ctrl force-fire on a building attacks it instead of capturing it.  Two layers: the engineer attack-clamp hook (`0x51E6C4`) and a feature-level vtable takeover of `InfantryClass::MouseOverObject` (`0x7EB0CC`, chained to the previous implementation).  No INI keys, no savegame change.  See `docs/Fixed-or-Improved-Logics.md` and `docs/EngineBindings.md`. |
 | `ROFCurve` | `[Features] ROFCurve` (default on, the behaviour itself is opt-in per weapon) | Weapon-level spin-up: with `ROFCurve=yes` and `ROFCurve.End` in a weapon section, that weapon fires faster (or slower) the longer it keeps firing; one chain per weapon, so a techno's weapons never reset each other's progress.  Seven `ROFCurve.*` weapon keys, no savegame change.  See `docs/New-or-Enhanced-Logics.md` (English + 中英对照). |
+| `ViewZoom` | `[Features] ViewZoom` (default on) | Tactical map zoom independent of the UI resolution: zooming in magnifies a centred crop of the native viewport (no extra rendering), zooming out renders a larger viewport and scales the frame back down, so units and terrain shrink together while the sidebar, fonts and buttons keep their size.  Three commands in **Options -> Keyboard** under **VentureLW** (`Zoom In (Tactical View)`, `Zoom Out (Tactical View)`, `Reset Tactical View Zoom`) plus middle-click reset; every match starts at the native level.  Fifteen `ViewZoom.*` keys in the `[VentureLW]` section (`ViewZoom.WideView` gates the zoom-out direction), 22 hooks, no savegame change.  See `docs/User-Interface.md` (English + 中英对照). |
 
 The stock `Example` / `ExampleIniKey` modules of the base are kept: they have no
 gameplay effect and serve as the base's own smoke tests.
@@ -102,5 +104,6 @@ game directory: the second one is detected and refused by design (see
 * Gameplay source: `Phobos-LWModified`, the Phobos fork the feature modules are
   ported from (GPL-3.0, attribution in `CREDITS.md`).
 * The base documents under `docs/` are inherited and describe the shared
-  machinery; `docs/Fixed-or-Improved-Logics.md` and `CREDITS.md` describe what
-  VentureLW adds on top.
+  machinery; `docs/Fixed-or-Improved-Logics.md`,
+  `docs/New-or-Enhanced-Logics.md` and `docs/User-Interface.md` describe what
+  VentureLW adds on top, and `CREDITS.md` holds the attribution.

@@ -78,6 +78,32 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   from the fork: Ctrl means attack for any building, allied included; AI attack
   scripts still convert engineers to capture missions - manual attacks only.)
 
+- **Tactical view zoom** (`[Features] ViewZoom`, default on) - ported from
+  Phobos-LWModified commit `51fa3628`, with the follow-up fixes `8c43bd3f` /
+  `ff77ea04` / `65043b38` / `a88c5d48` / `b62f46ce` / `70c86561`.  The tactical
+  map is rendered at a resolution of its own: it can be zoomed in (`k < 1`,
+  magnifying a centred crop of the native viewport - no extra rendering) and out
+  (`k > 1`, really rendering a larger viewport and scaling the frame back down)
+  while the sidebar, fonts, buttons and menus keep the resolution the game is set
+  to.  Three commands in **Options -> Keyboard** under **VentureLW**
+  (`Venture View Zoom In` / `Venture View Zoom Out` / `Venture Reset View Zoom`)
+  plus a middle-click reset; zoom is per-match state, every match starts at the
+  native level and the level is never saved.  **22 engine hooks**, **15
+  `ViewZoom.*` keys** in the `[VentureLW]` section of `VentureLW.ini`,
+  **0 savegame changes**.  Platform differences from the fork: the keys move from
+  its `[Phobos]` section into the platform section (the names are unchanged),
+  `[Features] ViewZoom` gates the module on top of the old `ViewZoom.Enable` key
+  (both must be true), the INI is read once at process start (restart the game;
+  the fork reloads on the options screen), the integer keys are range-validated
+  (`FullRedrawEvery` `-1..600`, `MaxStaticSkip` `0..600`, out of range falls back
+  to the default with a warning), `ViewZoom.WideView=false` leaves the zoom-out
+  command unregistered, there is no CSF localisation (the fork's
+  `TXT_VIEW_ZOOM_*` keys do not apply), and a fork bug that dropped the whole-map
+  level when `full` was written explicitly is fixed.  A co-installed platform
+  that implements the same tactical zoom is a feature-level conflict: the
+  platform does not detect it and the two are not meant to run together - pick
+  one via the switches.  See `docs/User-Interface.md` (English + 中英对照).
+
 ### Changed
 
 - The base **Example** module no longer owns a feature-level `UnitClass`

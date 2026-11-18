@@ -3,9 +3,8 @@
 // the longer it keeps firing).
 //
 // Ported from Phobos-LWModified commits 47023891 / b950ac50 (curve) and
-// 6c54bd6f (one chain per weapon, "B18"), see
-// Waterline/已实现/二期/ROF曲线实现记录.md and
-// ROF曲线多武器独立计数器实现记录.md.  Only the interval between two shots
+// 6c54bd6f (one chain per weapon, "B18"); the fork's internal implementation
+// records hold the full history.  Only the interval between two shots
 // changes: the projectile, animation, report, warhead and damage are untouched,
 // and no weapon is ever swapped.
 //

@@ -58,7 +58,7 @@ static_assert(offsetof(TechnoClass, Owner) == 0x21C, "TechnoClass::Owner moved -
 // weapon's own ROF).  The TemporalClass layout and the techno/weapon fields they
 // reach are therefore part of the binding.  The expected offsets are the ones the
 // engine itself uses; they were measured with scripts/linux/abi_probe.sh and
-// cross-checked against .analysis/gamemd/gamemd_full.asm.
+// cross-checked against the engine's instruction listing.
 static_assert(sizeof(TemporalClass) == 0x50, "TemporalClass ABI changed - re-check the YRpp pin");
 static_assert(offsetof(TemporalClass, Owner) == 0x24, "TemporalClass::Owner moved - re-check the YRpp pin");
 static_assert(offsetof(TemporalClass, Target) == 0x28, "TemporalClass::Target moved - re-check the YRpp pin");
@@ -75,6 +75,18 @@ static_assert(offsetof(WeaponTypeClass, Warhead) == 0xAC, "WeaponTypeClass::Warh
 static_assert(offsetof(WarheadTypeClass, Temporal) == 0x15A, "WarheadTypeClass::Temporal moved - re-check the YRpp pin");
 static_assert(offsetof(WeaponTypeClass, ROF) == 0xB0, "WeaponTypeClass::ROF moved - re-check the YRpp pin");
 static_assert(offsetof(BulletClass, WeaponType) == 0x130, "BulletClass::WeaponType moved - re-check the YRpp pin");
+
+// ViewZoom binding: the feature builds its enlarged surface pair and the two
+// engine scratch buffers itself (engine operator new + the engine's own 0x24
+// byte DSurface constructor 0x4BA5A0), swaps the Composite/Tile globals for the
+// duration of the render window, reads the visible-cell list length at 0x6DA938
+// ([ebx+0xE0]) and positions the camera from TacticalPos.
+static_assert(sizeof(RectangleStruct) == 0x10, "RectangleStruct ABI changed - re-check the YRpp pin");
+static_assert(sizeof(Point2D) == 0x8, "Point2D ABI changed - re-check the YRpp pin");
+static_assert(sizeof(DSurface) == 0x24, "DSurface ABI changed - re-check the YRpp pin");
+static_assert(offsetof(TacticalClass, TacticalPos) == 0xB0, "TacticalClass::TacticalPos moved - re-check the YRpp pin");
+static_assert(offsetof(TacticalClass, VisibleCellCount) == 0xE0,
+	"TacticalClass::VisibleCellCount moved - re-check the YRpp pin");
 
 // INI layer: the platform walks the engine's parsed INI objects (rules-INI
 // takeover), so the container layouts are part of the binding.

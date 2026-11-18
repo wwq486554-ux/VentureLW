@@ -2,10 +2,8 @@
 // TemporalAnySlot feature: a Temporal warhead works from any weapon slot, and
 // a running warp erases at the rate of the weapon that actually delivered it.
 //
-// Ported from Phobos-LWModified commits c2341b52 (see
-// Waterline/已实现/一期/SpecialAction功能实现记录.md §11 and
-// Waterline/已实现/二期/超时空武器体系实现记录.md §2.1), where the fix lives in
-// the fork's own copy of the two engine routines.  The platform cannot take the
+// Ported from Phobos-LWModified commit c2341b52; the fork's internal
+// implementation records describe the two original engine routines.  The platform cannot take the
 // fork's route: the official Phobos alpha2 already replaces
 // TemporalClass::GetWarpPerStep (0x71AB10) outright, and Ares replaces the middle
 // of TemporalClass::Update (its 0x71A84E hook resumes at 0x71A88D), so the

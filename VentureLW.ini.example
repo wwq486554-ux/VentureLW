@@ -146,6 +146,15 @@ ROFCurve=yes
 ; is the whole configuration.
 ArmedEngineers=yes
 
+; Tactical view zoom (id: view_zoom): render the tactical map at a resolution of
+; its own so it can be zoomed in and out while the sidebar, fonts and buttons
+; keep the game resolution.  The module's 15 keys are in the [VentureLW] section
+; at the bottom of this file; ViewZoom.WideView (off by default) gates the
+; zoom-out direction, and the three commands appear in Options -> Keyboard under
+; VentureLW.  No savegame change.  See docs/User-Interface.md
+; (English + 中英对照).
+ViewZoom=yes
+
 ; ---------------------------------------------------------------------------
 ; Module-owned keys
 ; ---------------------------------------------------------------------------
@@ -160,4 +169,75 @@ ArmedEngineers=yes
 ; The module declares each key at its read site with VENTURE_INI_BOOL /
 ; VENTURE_INI_INT / VENTURE_INI_STRING (platform/Feature.h); the base validates
 ; the value, logs the effective value, feeds the unknown-key scan and includes
-; the key in the DumpIniTemplate output.  The base ships no such keys.
+; the key in the DumpIniTemplate output.  The base ships no keys of its own; the
+; platform's ViewZoom module declares the first set below.
+
+; ---------------------------------------------------------------------------
+; [VentureLW] - ViewZoom module keys
+; ---------------------------------------------------------------------------
+; ViewZoom's own keys (see the [Features] entry above).  This is the module's
+; namespace section, not [Features]: the keys are parameters, not switches.
+; Integer keys are range-checked - a value outside the range falls back to the
+; declared default and is reported as a warning in the log.  The values are read
+; once when the game process starts; changing one requires restarting the game.
+; See docs/User-Interface.md for the effect of each key.
+[VentureLW]
+
+; Master switch of the feature (the old key).  The module additionally needs
+; [Features] ViewZoom=yes - both must be true.
+ViewZoom.Enable=true
+
+; k>1 (zoom-out) direction.  Off by default; while off the zoom-out command is
+; not registered either.
+ViewZoom.WideView=false
+
+; Append the runtime whole-map level at the end of the level table.
+ViewZoom.WholeMap=true
+
+; Middle click anywhere in the game window resets to the native level (a click
+; that moves more than 4 pixels is a drag and does not reset).
+ViewZoom.MiddleClickReset=true
+
+; Write level changes and resets to the log at INFO level (the per-match reset
+; line is always written).
+ViewZoom.ShowHint=true
+
+; Level table, map-resolution multipliers: k<1 zooms in, k>1 zooms out; the
+; keyword full (also whole / wholemap / all) is the runtime whole-map level;
+; at most 16 entries, ascending order is applied automatically.
+ViewZoom.Levels=0.25,0.33,0.5,0.67,1.0,1.25,1.5,2.0,2.5
+
+; Force one whole-viewport repaint every N frames (bounds the residue while
+; zoomed out): -1 disables the mechanism, 0 adapts to the measured cost;
+; range -1..600.
+ViewZoom.FullRedrawEvery=8
+
+; Cap on consecutive skipped static frames at a zoomed-out level: 0 disables the
+; skip; range 0..600.
+ViewZoom.MaxStaticSkip=4
+
+; Move dirty rectangles registered against the native viewport into the
+; enlarged view (A/B-proven required - keep true).
+ViewZoom.TranslateDirtyAreas=true
+
+; Present the sidebar against the native viewport (keep true; false brings back
+; the frozen-sidebar behaviour at zoomed-out levels).
+ViewZoom.SidebarNativeView=true
+
+; Restart the banded surface fill while dragging (measured to cost more than it
+; saves - keep false).
+ViewZoom.BandFillOnScroll=false
+
+; Enqueue cells of the enlarged view outside the window (measured harmful -
+; keep false).
+ViewZoom.WideCellEnqueue=false
+
+; Skip the first banded fill of the enlarged surface (A/B testing only).
+ViewZoom.NoBandFill=false
+
+; Paint the map area magenta instead of the frame (A/B testing only).
+ViewZoom.DebugFill=false
+
+; Write a performance and geometry report to the log every few seconds (DEBUG
+; level; performance investigation only).
+ViewZoom.Diagnostics=false

@@ -35,6 +35,15 @@
   layers (attack-clamp hook + `InfantryClass::MouseOverObject` wrapper) but takes
   the vtable slot over at run time with a chain to the previous implementation
   instead of the fork's static VTABLE patch.
+- **Tactical view zoom** - original fork implementation `51fa3628`, follow-up
+  fixes `8c43bd3f` / `ff77ea04` / `65043b38` / `a88c5d48` / `b62f46ce` /
+  `70c86561` (2026-10), ported to VentureLW 2026-11-18.  The platform keeps the
+  same 15 `ViewZoom.*` keys, level table and algorithm (the keys move from the
+  fork's `[Phobos]` section to the platform's `[VentureLW]` section) and fixes
+  the fork's bug that dropped the whole-map level when `full` was written
+  explicitly.  The three commands are registered through the platform command
+  registry (`Venture View Zoom In` / `Venture View Zoom Out` /
+  `Venture Reset View Zoom`).
 
 ## Pending attribution (not in this build yet)
 
