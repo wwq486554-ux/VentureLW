@@ -369,7 +369,7 @@ never deletes them itself.
 | --- | --- | --- |
 | `UnitClass` constructed | `Venture_Example_UnitClass_CTOR` (0x7353D3) | Example smoke test counts the unit (this module no longer owns a `UnitClass` extension, see the shared-extension bullet above) |
 | `UnitClass` destroyed (two sites) | `Venture_Example_UnitClass_DTOR` (0x735967, 0x7359DA) | Example smoke test counts the destroyed unit |
-| `TechnoClass` initialized | `Venture_TechnoData_Init` (0x6F42E3) | allocates the shared `TechnoDataExt` for every techno - all four concrete techno classes funnel through `TechnoClass::Init`; the 7-byte free site keeps the platform's 5-byte hook-window rule (the official Phobos alpha2 owns the 2-byte tail at 0x6F42F7) |
+| `TechnoClass` initialized | `Venture_TechnoData_Init` (0x6F42E3) | allocates the shared `TechnoDataExt` for every techno - all four concrete techno classes funnel through `TechnoClass::Init`; the 10-byte free site (`mov dword [esi+0x49c],1`, next instruction 0x6F42ED) keeps the platform's whole-instruction hook-window rule (the official Phobos alpha2 owns the 2-byte tail at 0x6F42F7) |
 | `TechnoClass` destroyed | `Venture_TechnoData_DTOR` (0x6F4500) | removes that extension at the `TechnoClass` base destructor, where all four concrete destructors chain in; one of the five-platform framework addresses (the audited handlers at it return 0) |
 | scenario teardown | `Venture_ScenarioClear` (0x685659) | `ExtensionIndex::ClearAll()` - every registered store clears itself, then the index is cleared |
 | pointer invalidated | `Venture_AnnounceInvalidPointer` (0x7258D0) | `ExtensionIndex::NotifyInvalidPointer()` - increments a diagnostic counter and drops a deferred allocation recorded for the invalidated owner; it does **not** delete extensions (removal stays owned by the destructor hook) and there is **no subscriber/log API** yet, so a feature cannot register a pointer-keyed cache on it today |
@@ -587,7 +587,13 @@ the level semantics, the measured cost and the hot-path rules.  The binding side
    `scripts/verify_build.py` fails otherwise.
 4. Keep the hook body self-contained, gate it on the owning feature's `enabled`
    flag, and never cut an instruction: the window must contain complete
-   instructions and `address + size` must be the next instruction.
+   instructions and `address + size` must be the next instruction.  When the
+   size is read off an objdump listing, remember objdump wraps the hex bytes of
+   an instruction longer than seven bytes over several lines - the window is the
+   whole instruction, not the first line's byte count.  (The offline validator
+   folds the continuation lines and its `--self-check` pins that down; a window
+   that cuts a store in half is replayed as truncated code by SyringeEx and
+   crashes the game on the first hit.)
 5. When the YRpp pin changes, follow `docs/Updating.md`.
 
 ## Limits in 2.1.0

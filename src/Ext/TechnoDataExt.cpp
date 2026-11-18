@@ -7,9 +7,14 @@
 // destructor, so the extensions of all per-techno platform features share the
 // same lifetime:
 //
-//   0x6F42E3  `mov dword [esi+0x49c],1` (7 bytes), near the end of
+//   0x6F42E3  `mov dword [esi+0x49c],1` (10 bytes), near the end of
 //             TechnoClass::Init; all four concrete techno classes funnel through
-//             it and ESI holds the techno.  A free site: none of the five
+//             it and ESI holds the techno.  The window is the whole store and
+//             the next instruction starts at 0x6F42ED: SyringeEx replays the
+//             bytes the window covers after the handler returns 0, so the size
+//             has to span complete instructions - a window that cuts this
+//             10-byte store in half replays truncated bytes and crashes the
+//             game on the first techno.  A free site: none of the five
 //             audited ecosystem hook tables uses it.  (The official Phobos
 //             alpha2 hooks 0x6F42F7, the `pop esi` + `ret` tail, with a 2-byte
 //             window - the platform's verifier requires at least the 5-byte near
@@ -105,8 +110,10 @@ void RemoveTechnoData(TechnoClass* const pTechno)
 } // namespace venture
 
 // --- lifecycle hooks -------------------------------------------------------
-// TechnoClass::Init, near the tail: allocate the platform's per-techno extension.
-DEFINE_HOOK(0x6F42E3, Venture_TechnoData_Init, 0x7)
+// TechnoClass::Init, near the tail: allocate the platform's per-techno
+// extension.  Window = the full 10-byte `mov dword [esi+0x49c],1`; the next
+// instruction is at 0x6F42ED.
+DEFINE_HOOK(0x6F42E3, Venture_TechnoData_Init, 0xA)
 {
 	GET(TechnoClass*, pThis, ESI);
 	venture::AllocateTechnoData(pThis);

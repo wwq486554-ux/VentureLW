@@ -86,6 +86,24 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   keeps its hooks, switch and logging as the smoke test, and the extension /
   savegame machinery stays covered by the shared store and the test suite.
 
+### Fixed
+
+- The shared per-techno extension's `TechnoClass::Init` hook (`0x6F42E3`)
+  declared a 7-byte window over the engine's 10-byte
+  `mov dword [esi+0x49c],1`.  SyringeEx re-executes the bytes a `return 0` hook
+  covers, so the truncated window replayed malformed code and the game exited on
+  the first techno construction (the first build of this batch flashed and
+  closed right after loading a scenario).  The window now spans the whole
+  instruction (size 0xA, next instruction `0x6F42ED`); `docs/HookCatalogue.md`
+  and `docs/EngineBindings.md` were corrected with it.
+- The offline hook-window validator (`scripts/verify_hook_windows.py`) mis-parsed
+  objdump's continuation lines for instructions longer than seven bytes: the
+  continuation was recorded as an instruction of its own, so the truncated
+  window above passed validation (31 of 32 windows were valid, the report said
+  32/32).  The parser now folds continuation bytes into the instruction they
+  belong to, and a new offline `--self-check` (run by `scripts/verify_build.py`)
+  pins both the parsing and the window-tiling behaviour down.
+
 ## [0.1.0] - 2026-11-14
 
 First build of the VentureLW platform, bootstrapped from the MIT-licensed
