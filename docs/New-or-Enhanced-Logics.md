@@ -212,3 +212,204 @@ ROFCurve.Cycle=no            ; 布尔
 
 > 移植自 Phobos-LWModified（提交 `47023891` / `b950ac50` / `6c54bd6f`，2026-10）。
 > 7 个键与曲线未改动；注入点与状态存放按平台规则重做。
+
+## SuddenDeath (warhead-level instant kill)
+
+- A warhead can decide that whatever its detonation reaches dies, regardless of
+  damage, armour, `Verses`, health, veterancy, `Immune=yes`, Iron Curtain or
+  Force Shield.  This is the migrated fork feature, keyed by the warhead section
+  exactly as before: `SuddenDeath=yes`.
+- The hit is only **recorded** during the damage call; the kill happens at the
+  head of the next logic frame.  That one-frame delay is deliberate: destroying
+  an object from inside the detonation re-enters the object bookkeeping the
+  engine is still walking (the fork lost a building animation to a second
+  destruction that way).  It is invisible in play; only a trigger that watches
+  the kill in the same frame would notice it.
+- The same detonation sweeps the terrain inside `CellSpread + 0.5` cells: ore is
+  cleared completely, bridges collapse through the engine's own IonCannon branch
+  (so one hit always breaks the span, no `BridgeStrength` roll), and terrain
+  objects (trees, tiberium pillars) are removed without a health check - which is
+  what makes the `Immune=yes` tiberium pillars of this mod removable.
+- A unit that carries a SuddenDeath weapon gets the Attack cursor on an
+  `Immune=yes` target and may fire at a target with a `Verses` entry of 0%: the
+  engine's "cannot hurt it" gate and the cursor downgrade are bypassed for that
+  weapon.  AI target selection is not changed; this is the manual fire path.
+- `SuddenDeath.Mode=normal` (default) kills through the engine's ordinary death
+  path: wreck, `DeathWeapon`, revenge weapon and kill credit all happen as usual.
+  `SuddenDeath.Mode=erase` removes the object instead: no wreck, no
+  `DeathWeapon`, no revenge weapon, no death animation, and no kill credit to the
+  attacker (the kill is registered against the target's own owner).  A transport
+  removed this way takes its passengers with it.
+- The module is opt-in per warhead; `[Features] SuddenDeath` (default on)
+  switches the module itself.  There are **no** platform INI keys: both keys live
+  in the warhead section of `rules(md).ini`.
+
+In `rulesmd.ini`:
+```ini
+[SOMEWARHEAD]                ; WarheadType
+SuddenDeath=no               ; boolean, default no (opt-in)
+SuddenDeath.Mode=normal      ; normal | erase, default normal
+CellSpread=1.5               ; the area the terrain sweep covers, as usual
+```
+
+```{note}
+- `SuddenDeath.Mode` only accepts the two words `normal` and `erase` (ASCII case
+  insensitive).  A numeric value or any other word is rejected with a warning and
+  the default `normal` stays in effect.
+- `Damage=` does not decide whether the target dies - the execution is separate
+  from the warhead's own damage.  It only decides which targets the engine's
+  regular damage call reaches (and therefore which ones get recorded).
+- Without `CellSpread` the sweep covers the impact cell only.
+- Terrain objects still need Ctrl to be clicked unless the weapon has
+  `TerrainFire=yes`; that is the vanilla `TreeTargeting` rule and is unrelated to
+  this feature.
+- The one-frame delay and the `erase` mode are the same as in the fork.  Unlike
+  the fork, the platform keeps the two keys in a **type-level table that is never
+  saved**: old and new savegames stay interchangeable, and switching the module
+  on or off never changes a savegame.
+- When the official Phobos is co-loaded and the target carries an active Phobos
+  shield, Phobos' own handler at the armour-gate site returns early and skips the
+  SuddenDeath bypass; the checked mod data configures no shields, and the
+  documented fallback would be to move that hook one instruction earlier.
+```
+
+### Differences from the Phobos-LWModified version
+
+- **No savegame change.**  The fork stored the two keys in its `WarheadTypeExt`,
+  which made savegames from a build with the feature incompatible with one
+  without it; the platform keeps a type-level table filled while `rules(md).ini`
+  is parsed and never serializes anything.
+- **No Phobos extension classes.**  The fork's erase mode called
+  `TechnoExt::KillSelf(..., Vanish)` and its terrain removal called
+  `TerrainTypeExt::Remove` / `PlayDestroyEffects`.  The platform reimplements both
+  as pure YRpp virtual calls (the same engine sequence), so it works under
+  Ares + official Phobos and without either.
+- **`DestroyAnim` / `DestroySound` are not played.**  Those are Phobos TerrainType
+  extension keys; the checked mod data does not use them, so the behaviour is
+  identical with the shipped rules.  If they are ever needed, they are a separate
+  small feature.
+- **Diagnostics are the platform log**, not a compile-time `constexpr` switch:
+  `[SuddenDeath]` Info lines (configuration summary, the first kills, scenario
+  clear), Debug lines (per hit, per execution, per swept cell) and Warn lines
+  (invalid mode).  Set `[Platform] LogLevel=debug` to see the per-record trail.
+- The keys, the modes and the cursor / fire-gate behaviour are unchanged, so a
+  fork configuration migrates as-is (move the warhead sections into the new
+  platform's `rules.ini`).
+
+### Implementation notes (platform)
+
+- Eight hooks (`docs/HookCatalogue.md`): `0x701900` records a hit at
+  `TechnoClass::ReceiveDamage`; `0x75DEA0` reads the two keys in the
+  `WarheadTypeClass::LoadFromINI` epilogue; `0x55B4E1` executes the queues at the
+  head of `LogicClass::Update`; `0x6FCB64` lets a SuddenDeath weapon pass the
+  armour/`Verses` gate; `0x417F63` / `0x51F179` / `0x74049A` keep the Attack
+  cursor on an `Immune=yes` target for aircraft / infantry / units;
+  `0x489286` records a detonation's centre and `CellSpread` at the entry of
+  `MapClass::DamageArea`.
+- The kill queue is `(target, attacker, house, mode)` with one entry per target
+  per frame; the terrain queue is `(coords, CellSpread)`.  Both are transient and
+  dropped by the platform's scenario-clear observer (`RegisterScenarioClearObserver`
+  in `docs/EngineBindings.md`), so a savegame load, a retry or a return to the
+  main menu can never inherit a pending kill.  The `RemovedTerrain` /
+  `BlownBridges` de-duplication tables live in the same scenario scope.
+- A pointer recorded in one frame is looked up in `TechnoClass::Array` before it
+  is dereferenced in the next frame: an object that was deleted in between is
+  simply skipped instead of being read.
+- `erase` calls `KillPassengers`, `Stun`, `Limbo`, `RegisterKill(Owner)` and
+  `UnInit` through the YRpp virtual slots (a building's bunker is unloaded
+  first).  It never enters `ReceiveDamage`, which is exactly why no death effect
+  happens.  The order matters and is documented in the source.
+- The bridge sweep passes the engine's `IonCannonWarhead` to a one-point
+  `MapClass::DamageArea` at the bridge deck height, then runs `BlowUpBridge` for
+  the aftermath; a detonation produced by that nested call is ignored, so the
+  sweep cannot feed itself.
+- No per-object extension, no savegame trailer row, no new platform INI key.
+  The warhead table is a feature-local `unordered_map` filled when the rules are
+  parsed (same pattern as the ROF curve).
+
+## 即死弹头（弹头级秒杀）
+
+- 弹头可以让它这一发爆炸覆盖到的一切直接死亡：伤害、护甲、`Verses`、血量、
+  老练度、`Immune=yes`、铁幕、力场都不再是限制。这是从 fork 迁移过来的功能，
+  弹头键完全沿用旧名：`SuddenDeath=yes`。
+- 命中当帧**只登记**，处决发生在下一逻辑帧的开头。这一帧延迟是刻意的：在弹体
+  引爆过程里销毁对象会重入引擎正在遍历的对象簿记（fork 曾因此把建筑动画二次
+  销毁）。实战中看不出来；只有"在同一帧里检测死亡"的触发器会注意到这一帧之差。
+- 同一次爆炸还会清扫 `CellSpread + 0.5` 范围内的地形：矿石**一次清光**，桥走
+  引擎自己的离子炮分支（**一次必断**，不经过 `BridgeStrength` 概率），地形对象
+  （树、矿柱）**不做血量判定直接移除**——这正是 `Immune=yes` 的矿柱也能被打掉的
+  原因。
+- 手里拿着即死弹头武器的单位，对 `Immune=yes` 目标**能出攻击光标**，对 `Verses`
+  为 0% 的目标**能开火**：该武器的"打不动"判定与光标降级被绕过。这是玩家手动
+  开火路径；AI 的选目标逻辑不受影响。
+- `SuddenDeath.Mode=normal`（默认）走引擎正常死亡路径：留残骸、触发
+  `DeathWeapon` 与复仇武器、正常记功。`SuddenDeath.Mode=erase` 则直接移除对象：
+  无残骸、无死亡武器、无复仇武器、无死亡动画、**不计功**给攻击者（击杀记在目标
+  自己的 owner 名下）。被这样抹掉的运输载具会连乘客一起消失。
+- 行为按弹头逐段 opt-in；`[Features] SuddenDeath`（默认开）是模块总开关。
+  **没有**平台侧 INI 键：两个键都在 `rules(md).ini` 的弹头段里。
+
+在 `rulesmd.ini` 中：
+```ini
+[SOMEWARHEAD]                ; 弹头段（WarheadType）
+SuddenDeath=no               ; 布尔，默认 no（opt-in）
+SuddenDeath.Mode=normal      ; normal | erase，默认 normal
+CellSpread=1.5               ; 地形清扫范围，按原版含义
+```
+
+```{note}
+- `SuddenDeath.Mode` 只认 `normal` 与 `erase` 两个单词（ASCII 大小写不敏感）。
+  写数字或别的词会按非法值告警，并保持默认 `normal`。
+- `Damage=` 不决定目标死不死——处决与弹头自身伤害是两条路径。它只影响引擎那次
+  常规伤害会打到谁，因而影响谁会**被登记**。
+- 不写 `CellSpread` 时，清扫范围只有命中那一格。
+- 地形对象仍然要按 Ctrl 才出攻击光标（除非武器写了 `TerrainFire=yes`），这是
+  原版 `TreeTargeting` 规则，与本功能无关。
+- 一帧延迟与 `erase` 语义与 fork 相同。但平台把两个键放在**从不入存档的类型级表**
+  里：新旧存档可以互换，功能开关不影响任何存档内容。
+- 与官方 Phobos 共载、且目标带着激活的 Phobos 护盾时，Phobos 在护甲门同址的
+  handler 会提前返回，从而跳过即死旁路；已核对的 MOD 数据没有配置护盾，备选做法
+  是把该 hook 前移一条指令（见 `docs/HookCatalogue.md` 该行备注）。
+```
+
+### 与 Phobos-LWModified（fork）版本的差异
+
+- **0 存档变更。** fork 把两个键存进 `WarheadTypeExt`，导致带该功能的存档与不带
+  的构建互不兼容；平台只在解析 `rules(md).ini` 时填一张类型级表，不序列化任何
+  东西。
+- **不依赖 Phobos 扩展类。** fork 的 erase 调 `TechnoExt::KillSelf(..., Vanish)`，
+  地形移除调 `TerrainTypeExt::Remove` / `PlayDestroyEffects`；平台用纯 YRpp 虚调用
+  复刻同一段引擎序列，因此在 Ares + 官方 Phobos 下和两者都不装时都能工作。
+- **不播放 `DestroyAnim` / `DestroySound`。** 这两个是 Phobos 的 TerrainType 扩展
+  键；已核对的本 MOD 数据没有使用，所以与共载官方 Phobos 时的实际行为一致。将来
+  若需要，是独立的小功能。
+- **诊断走平台日志**，不是编译期 `constexpr` 开关：`[SuddenDeath]` 的 Info（配置
+  摘要、前几次处决、场景清理）、Debug（逐条命中 / 处决 / 清扫格）、Warn（非法
+  Mode）。把 `[Platform] LogLevel` 设为 `debug` 可看到逐条轨迹。
+- 键名、两种模式、光标与开火门行为不变，fork 的配置可以直接迁移（把弹头段搬进
+  新平台的 `rules.ini` 即可）。
+
+### 实现说明（平台）
+
+- 八个 hook（`docs/HookCatalogue.md`）：`0x701900` 在
+  `TechnoClass::ReceiveDamage` 前门登记命中；`0x75DEA0` 在
+  `WarheadTypeClass::LoadFromINI` 成功尾声读两个键；`0x55B4E1` 在
+  `LogicClass::Update` 帧头执行队列；`0x6FCB64` 让即死武器通过护甲 / `Verses` 门；
+  `0x417F63` / `0x51F179` / `0x74049A` 分别让飞机 / 步兵 / 载具对 `Immune=yes`
+  目标保留攻击光标；`0x489286` 在 `MapClass::DamageArea` 入口登记爆炸中心与
+  `CellSpread`。
+- 击杀队列是 `(目标, 攻击者, 来源方, 模式)`，同一帧同一目标只留一条；地形队列是
+  `(坐标, CellSpread)`。两者都是场景级瞬态，由平台的场景清理观察者
+  （`RegisterScenarioClearObserver`，见 `docs/EngineBindings.md`）清空，所以读档、
+  重试、回主菜单都不会继承上一局的待处决记录。`RemovedTerrain` / `BlownBridges`
+  两张去重表也在同一生命周期内。
+- 一帧登记的裸指针在下一帧使用前，先到 `TechnoClass::Array` 里确认它还在：期间
+  已被删除的对象直接跳过，而不是解引用野指针。
+- `erase` 通过 YRpp 虚槽依次调用 `KillPassengers`、`Stun`、`Limbo`、
+  `RegisterKill(Owner)`、`UnInit`（建筑先 `UnloadBunker`）。它完全不进
+  `ReceiveDamage`，这正是"没有任何死亡效果"的原因；顺序有讲究，写在源码注释里。
+- 炸桥时以桥面高度向引擎的 `IonCannonWarhead` 请求一次 1 点伤害的
+  `MapClass::DamageArea`，再调 `BlowUpBridge` 做善后；这次嵌套调用产生的爆炸会被
+  忽略，因此清扫不会自我喂养。
+- 没有 per-object 扩展、没有存档尾块、没有新增平台 INI 键。弹头表是 feature 私有
+  的 `unordered_map`，在解析 rules 时填充（与 ROF 曲线同一模式）。

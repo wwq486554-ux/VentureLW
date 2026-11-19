@@ -155,6 +155,17 @@ ArmedEngineers=yes
 ; (English + 中英对照).
 ViewZoom=yes
 
+; SuddenDeath warheads (id: sudden_death): a warhead that writes
+; SuddenDeath=yes in its own rules section kills whatever its detonation
+; reaches - past damage, armour, Verses, Immune=yes, Iron Curtain and Force
+; Shield.  SuddenDeath.Mode=erase removes the object instead of killing it (no
+; wreck, no DeathWeapon, no revenge weapon, no death animation, no kill credit).
+; The same hit clears ore, collapses bridges and removes terrain objects inside
+; CellSpread + 0.5.  The behaviour is opt-in per warhead, so this switch only
+; enables the module; it has no platform keys.  No savegame change.  See
+; docs/New-or-Enhanced-Logics.md (English + 中英对照).
+SuddenDeath=yes
+
 ; ---------------------------------------------------------------------------
 ; Module-owned keys
 ; ---------------------------------------------------------------------------

@@ -38,6 +38,15 @@ bool IsStarted();
 void OnScenarioClear();
 void OnInvalidatePointer(AbstractClass* pInvalid, bool removed);
 
+// Registers a callback that runs once per scenario clear, after the platform
+// reset its own extension state - the hook a feature uses for its transient
+// state (queues, de-duplication tables) that must never survive a new match, a
+// mission retry, a return to the main menu or a savegame load.  The engine-free
+// registry lives in Core/ScenarioClear.h; registration is de-duplicated, a null
+// pointer is ignored, and observers must not register another observer from
+// inside the callback (see that header for the full contract).
+void __cdecl RegisterScenarioClearObserver(void (__cdecl* observer)());
+
 // Detected optional hosts as a bit set (platform/HostIds.h + custom hosts).
 unsigned HostMask();
 }

@@ -191,8 +191,12 @@ Besides the sizes above, `EngineCompat.h` pins the field offsets the platform
 reads directly: the `TemporalClass` chain fields and `TechnoClass::align_154` for
 the TemporalAnySlot feature, the weapon fields the ROFCurve feature reads
 (`WeaponTypeClass::Damage` / `Warhead` / `ROF`, `WarheadTypeClass::Temporal`,
-`BulletClass::WeaponType`), and the infantry fields ArmedEngineers reads
-(`InfantryClass::Type`, `InfantryTypeClass::Engineer`, `TechnoClass::Owner`).  The engine-side expected values are documented in
+`BulletClass::WeaponType`), the infantry fields ArmedEngineers reads
+(`InfantryClass::Type`, `InfantryTypeClass::Engineer`, `TechnoClass::Owner`), and
+the object / warhead / terrain fields SuddenDeath reads (`ObjectClass::Health` /
+`InLimbo` / `IsAlive` / `NextObject`, `TechnoClass::BunkerLinkedItem`,
+`WarheadTypeClass::CellSpread`, `RulesClass::C4Warhead` / `IonCannonWarhead`,
+`CellClass::MapCoords` and the `TerrainClass` layout).  The engine-side expected values are documented in
 `docs/Fixed-or-Improved-Logics.md` / `docs/New-or-Enhanced-Logics.md` and were
 cross-checked against the disassembly; they are measured with
 `scripts/linux/abi_probe.sh`.
@@ -273,6 +277,30 @@ See `include/platform/Feature.h` for the exact `FeatureDescriptor` /
 `FeatureContext` fields (`id` is the internal identifier, `iniKey` is the INI
 switch key, `requiredHosts` / `anyOfHosts` host declarations, `enabled`,
 `Initialize`).
+
+## Scenario-clear observer binding
+
+A feature sometimes owns state that is neither an extension (it is not per
+object) nor type-level configuration (it is per scenario): a queue of objects
+recorded during the current frame, a de-duplication table of cells already
+swept, the object whose cursor is being computed.  The platform's scenario clear
+is the only hook that covers all the ways a scenario ends - a new match, a
+mission retry, a return to the main menu and a savegame load (the engine's
+object-state reader calls `ResetScenario` inside the load).
+
+* The API is `venture::RegisterScenarioClearObserver()` (`src/Core/Platform.h`),
+  a single `__cdecl` callback with no arguments.  The registry itself is
+  engine-free (`src/Core/ScenarioClear.h`) so the contract is unit-tested
+  (`tests/test_scenario_clear.cpp`).
+* `Platform::OnScenarioClear()` runs the observers **after** it reset the
+  extension state, so an observer may assume every store is already empty.  It
+  does so unconditionally, including inside a savegame load - unlike the load
+  window, which is deliberately kept open there.
+* Registration is de-duplicated, a null pointer is ignored, and the notifier
+  takes a snapshot before calling the observers (registering another observer
+  from inside a callback only takes effect from the next scenario clear).
+* `SuddenDeath` is the first user: its hit queue, terrain queue and the
+  `RemovedTerrain` / `BlownBridges` tables are dropped there.
 
 ## Extension storage binding
 
@@ -371,13 +399,19 @@ never deletes them itself.
 | `UnitClass` destroyed (two sites) | `Venture_Example_UnitClass_DTOR` (0x735967, 0x7359DA) | Example smoke test counts the destroyed unit |
 | `TechnoClass` initialized | `Venture_TechnoData_Init` (0x6F42E3) | allocates the shared `TechnoDataExt` for every techno - all four concrete techno classes funnel through `TechnoClass::Init`; the 10-byte free site (`mov dword [esi+0x49c],1`, next instruction 0x6F42ED) keeps the platform's whole-instruction hook-window rule (the official Phobos alpha2 owns the 2-byte tail at 0x6F42F7) |
 | `TechnoClass` destroyed | `Venture_TechnoData_DTOR` (0x6F4500) | removes that extension at the `TechnoClass` base destructor, where all four concrete destructors chain in; one of the five-platform framework addresses (the audited handlers at it return 0) |
-| scenario teardown | `Venture_ScenarioClear` (0x685659) | `ExtensionIndex::ClearAll()` - every registered store clears itself, then the index is cleared |
+| scenario teardown | `Venture_ScenarioClear` (0x685659) | `ExtensionIndex::ClearAll()` - every registered store clears itself, then the index is cleared, then every `RegisterScenarioClearObserver()` callback runs (feature-owned transient state) |
 | pointer invalidated | `Venture_AnnounceInvalidPointer` (0x7258D0) | `ExtensionIndex::NotifyInvalidPointer()` - increments a diagnostic counter and drops a deferred allocation recorded for the invalidated owner; it does **not** delete extensions (removal stays owned by the destructor hook) and there is **no subscriber/log API** yet, so a feature cannot register a pointer-keyed cache on it today |
 
 Consequences for feature authors:
 
 * never hold an extension pointer across a scenario boundary - scenario clear
   destroys all of them;
+* feature-owned transient state (a queue of objects recorded this frame, a
+  de-duplication table, a cached cursor context) must be dropped through
+  `venture::RegisterScenarioClearObserver()` - see the scenario-clear observer
+  section above; the
+  extension stores know nothing about it, and a new scenario must never inherit
+  it;
 * a base-class view and the derived `Fetch` return the same instance; do not keep
   a base view cached across frames (the pointer-invalidation notification is not
   exposed to features yet - see the lifecycle table above);

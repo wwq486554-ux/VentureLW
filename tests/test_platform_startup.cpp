@@ -1,6 +1,6 @@
 // Integration test: the production startup path of src/Core/Platform.cpp.
 //
-// TEST_DEPS: src/Core/Platform.cpp src/Core/PlatformPaths.cpp src/Core/Log.cpp src/Core/Ini.cpp src/Core/IniRegistry.cpp src/Core/FeatureRegistry.cpp src/Core/HostRegistry.cpp src/Core/Hosts.Builtin.cpp src/Core/Hosts.Custom.cpp src/Core/IniTakeover.cpp src/Core/Lineage.cpp src/Ext/AbstractExt.cpp src/Ext/ExtensionIndex.cpp
+// TEST_DEPS: src/Core/Platform.cpp src/Core/PlatformPaths.cpp src/Core/Log.cpp src/Core/Ini.cpp src/Core/IniRegistry.cpp src/Core/FeatureRegistry.cpp src/Core/HostRegistry.cpp src/Core/Hosts.Builtin.cpp src/Core/Hosts.Custom.cpp src/Core/IniTakeover.cpp src/Core/Lineage.cpp src/Core/ScenarioClear.cpp src/Ext/AbstractExt.cpp src/Ext/ExtensionIndex.cpp
 //
 // Why this test exists
 // --------------------

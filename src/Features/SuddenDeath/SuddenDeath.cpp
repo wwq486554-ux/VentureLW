@@ -1,0 +1,605 @@
+// ---------------------------------------------------------------------------
+// SuddenDeath feature - state, queues and the execution side (B6, R4).
+//
+// The header holds the full design summary; this unit is the engine-facing half:
+//
+//   * the type-level warhead table (`WarheadTypeClass* -> ExecutionMode`), filled
+//     from the WarheadTypeClass::LoadFromINI epilogue;
+//   * the two transient queues and the de-duplication tables (removed terrain,
+//     blown bridges), dropped by the platform's scenario-clear observer;
+//   * ExecutePending(), called at the head of every logic frame: the ordinary
+//     kill (normal mode), the full erase sequence (erase mode) and the terrain /
+//     ore / bridge sweep;
+//   * the cursor helper the three `Immune=yes` downgrade hooks ask about.
+//
+// Everything below uses the pinned YRpp virtual calls only; there is no direct
+// call to a raw engine address (the fork's implementation record had the two
+// ObjectClass addresses it needed named the wrong way round - the audit for this
+// round pinned them and the platform never needs them by address at all).
+// ---------------------------------------------------------------------------
+
+#include "Features/SuddenDeath/SuddenDeath.h"
+
+#include "Engine/EngineCompat.h"
+
+#include <Helpers/Cast.h>
+#include <Helpers/Iterators.h>
+
+#include "Core/EngineIni.h"
+#include "Core/Log.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace venture::features::sudden_death
+{
+namespace
+{
+// Per-warhead configuration.  Type-level and process-lifetime: warhead types are
+// created once while rules(md).ini is parsed, so the pointer keys are stable and
+// the table is deliberately never cleared by a scenario clear (the rules are not
+// re-read either, exactly like the ROFCurve weapon table).
+std::unordered_map<const WarheadTypeClass*, ExecutionMode> g_warheadModes;
+
+struct TechnoRecord
+{
+	TechnoClass* Target;
+	ObjectClass* Attacker;
+	HouseClass* AttackingHouse;
+	ExecutionMode Mode;
+};
+
+struct TerrainRecord
+{
+	CoordStruct Coords;
+	double CellSpread;
+};
+
+// Transient, scenario-scoped state.  Raw pointers are safe because both queues
+// are emptied at the head of every logic frame and dropped on every scenario
+// clear; neither queue may carry a pointer across a frame.
+std::vector<TechnoRecord> g_technoQueue;
+std::vector<TerrainRecord> g_terrainQueue;
+
+// Objects and cells already handled in this scenario.  The entries are kept
+// until the scenario ends: a later object reusing a removed terrain's address
+// costs that one object a SuddenDeath hit, which is the safe direction to err
+// in.  The same table keeps two detonations in one frame from collapsing the
+// same bridge twice.
+std::vector<TerrainClass*> g_removedTerrain;
+std::vector<CellClass*> g_blownBridges;
+
+constexpr std::size_t kRemovedTerrainLimit = 256;
+constexpr std::size_t kTerrainQueueLimit = 1024;
+
+// ReduceTiberium's argument is a number of density steps, not damage: the cell
+// keeps its density in a byte capped at 11 and the engine removes the overlay
+// outright only when the argument reaches density + 1.  Anything above the cap
+// therefore means "take all of it".
+constexpr int kTiberiumClearance = 100;
+
+// Log throttles: the first few records are evidence, a long battle must not
+// flood the log.  Debug lines are already gated by the platform log level.
+constexpr int kHitLogLimit = 8;
+constexpr int kExecuteLogLimit = 8;
+constexpr int kSkipLogLimit = 4;
+constexpr int kTerrainLogLimit = 12;
+constexpr int kCursorLogLimit = 8;
+
+int g_hitLogs = 0;
+int g_executeLogs = 0;
+int g_skipLogs = 0;
+int g_terrainLogs = 0;
+int g_cursorLogs = 0;
+bool g_summaryLogged = false;
+bool g_queueLimitWarned = false;
+
+// Set while the sweep itself asks the engine to collapse a bridge: the nested
+// MapClass::DamageArea call reaches our own 0x489286 hook, and that detonation
+// must not be recorded again (the IonCannon warhead is a data-driven choice and
+// may even be the SuddenDeath warhead itself).
+bool g_selfDetonation = false;
+
+unsigned PtrOf(const void* const pointer)
+{
+	return static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(pointer));
+}
+
+const char* IdOf(const TechnoClass* const pTechno)
+{
+	if (!pTechno)
+		return "<null>";
+
+	const TechnoTypeClass* const pType = pTechno->GetTechnoType();
+	return pType && pType->ID && *pType->ID ? pType->ID : "?";
+}
+
+void LogQueueLimitOnce()
+{
+	if (g_queueLimitWarned)
+		return;
+
+	g_queueLimitWarned = true;
+	Log::Warn("[SuddenDeath] more than %zu terrain records in one frame - further records are "
+		"dropped (a pathological CellSpread / fire rate combination)",
+		kTerrainQueueLimit);
+}
+
+// A raw pointer recorded in one frame may belong to an object that left the
+// world (and was deleted) before the next frame.  Dereferencing it to read
+// IsAlive would already be too late, so membership in the engine's own techno
+// array is checked first - a deleted object is removed from that array, a
+// pointer comparison is harmless.  Objects that are alive but in limbo are still
+// in the array; the usual state guards below handle them.
+bool IsInTechnoArray(const TechnoClass* const pTechno)
+{
+	for (int index = 0; index < TechnoClass::Array.Count; ++index)
+	{
+		if (TechnoClass::Array[index] == pTechno)
+			return true;
+	}
+
+	return false;
+}
+
+void ExecuteTechnoQueue()
+{
+	if (g_technoQueue.empty())
+		return;
+
+	// Move the queue out first: a kill runs engine code that may record a new hit
+	// (a DeathWeapon, a chain reaction).  Those records belong to the next frame.
+	std::vector<TechnoRecord> queue;
+	queue.swap(g_technoQueue);
+
+	for (const TechnoRecord& record : queue)
+	{
+		TechnoClass* const pTarget = record.Target;
+
+		// A frame has passed since the hit was recorded and the warhead's own
+		// damage settled in it: the target may already be dead, gone or in limbo.
+		if (!pTarget || !IsInTechnoArray(pTarget))
+		{
+			if (g_skipLogs < kSkipLogLimit)
+			{
+				++g_skipLogs;
+				Log::Debug("[SuddenDeath] execute skip 0x%08X: left the world", PtrOf(pTarget));
+			}
+			continue;
+		}
+
+		if (!pTarget->IsAlive || pTarget->InLimbo || pTarget->Health <= 0)
+		{
+			if (g_skipLogs < kSkipLogLimit)
+			{
+				++g_skipLogs;
+				Log::Debug("[SuddenDeath] execute skip 0x%08X %s: %s", PtrOf(pTarget), IdOf(pTarget),
+					!pTarget->IsAlive ? "not alive" : (pTarget->InLimbo ? "in limbo" : "no health left"));
+			}
+			continue;
+		}
+
+		if (record.Mode == ExecutionMode::Erase)
+		{
+			if (g_executeLogs < kExecuteLogLimit)
+			{
+				++g_executeLogs;
+				Log::Info("[SuddenDeath] erase 0x%08X %s (health %d)", PtrOf(pTarget), IdOf(pTarget),
+					pTarget->Health);
+			}
+
+			// --- the erase sequence (see the header of this unit) --------------
+			// 1) A bunker's contents are released first, or they disappear with
+			//    the building and leave dangling pointers behind.
+			BuildingClass* const pBuilding = abstract_cast<BuildingClass*>(pTarget);
+			if (pBuilding && pTarget->BunkerLinkedItem)
+				pBuilding->UnloadBunker();
+
+			// 2) Passengers die the ordinary way - they are not SuddenDeath
+			//    targets themselves.
+			pTarget->KillPassengers(pTarget);
+
+			// 3) Stop first, then unlink.  Keeping the object alive here is what
+			//    keeps a co-loaded platform's building-death animation cleanup
+			//    out of the sequence (the fork's LWDORK crash window).
+			pTarget->Stun();
+			pTarget->Limbo();
+
+			// 4) The kill is registered against the target's own owner: it is a
+			//    removal, not a kill credited to the attacker.
+			pTarget->RegisterKill(pTarget->Owner);
+
+			// 5) Announce, clear IsAlive, queue for deletion.  This re-enters
+			//    Limbo through the virtual slot, which the InLimbo guard short
+			//    circuits - the order is the one the reference implementation
+			//    used and must not be reordered.
+			pTarget->UnInit();
+			continue;
+		}
+
+		WarheadTypeClass* const pC4Warhead =
+			RulesClass::Instance ? RulesClass::Instance->C4Warhead : nullptr;
+
+		if (!pC4Warhead)
+		{
+			if (g_skipLogs < kSkipLogLimit)
+			{
+				++g_skipLogs;
+				Log::Warn("[SuddenDeath] normal kill skipped: RulesClass::C4Warhead is null");
+			}
+			continue;
+		}
+
+		// The ordinary exit, in the shape the engine already knows: the neutral
+		// C4 warhead through the normal ReceiveDamage entry, defences ignored so
+		// armour, immunity, Iron Curtain and shields cannot stop it, and the
+		// attacker passed along so the kill is still credited to whoever fired.
+		const int healthBefore = pTarget->Health;
+		pTarget->ReceiveDamage(&pTarget->Health, 0, pC4Warhead, record.Attacker, true, false,
+			record.AttackingHouse);
+
+		if (g_executeLogs < kExecuteLogLimit)
+		{
+			++g_executeLogs;
+			Log::Info("[SuddenDeath] kill 0x%08X %s (health %d -> %d)", PtrOf(pTarget),
+				IdOf(pTarget), healthBefore, pTarget->Health);
+		}
+	}
+}
+
+bool IsBridgeAlreadyBlown(const CellClass* const pCell)
+{
+	return std::find(g_blownBridges.begin(), g_blownBridges.end(), pCell) != g_blownBridges.end();
+}
+
+void SweepTerrainObject(TerrainClass* const pTerrain)
+{
+	if (!pTerrain || pTerrain->InLimbo || pTerrain->IsBurning || pTerrain->IsCrumbling)
+		return;
+
+	// Health is deliberately not part of this test: a TerrainType that does not
+	// write Strength= enters the world with Health 0, and the tiberium pillars of
+	// this mod are exactly that kind of terrain - testing health would skip the
+	// objects a SuddenDeath warhead is most wanted against.
+	if (std::find(g_removedTerrain.begin(), g_removedTerrain.end(), pTerrain) != g_removedTerrain.end())
+		return;
+
+	const TerrainTypeClass* const pType = pTerrain->Type;
+
+	if (!pType)
+		return;
+
+	if (g_terrainLogs < kTerrainLogLimit)
+	{
+		++g_terrainLogs;
+		Log::Debug("[SuddenDeath] remove terrain %s 0x%08X", pType->ID && *pType->ID ? pType->ID : "?",
+			PtrOf(pTerrain));
+	}
+
+	// The engine's own terrain death tail (TerrainClass::ReceiveDamage after its
+	// crumbling branch): redraw the area, then leave the world through the same
+	// virtual calls.  Terrain never reaches the damage pipeline, so this is the
+	// only way out of the world for it.  The fork's DestroyAnim / DestroySound
+	// hooks are Phobos extension keys that this mod does not use - skipping them
+	// changes nothing with the shipped data.
+	RectangleStruct rect{};
+	pTerrain->GetRenderDimensions(&rect);
+
+	if (TacticalClass::Instance)
+		TacticalClass::Instance->RegisterDirtyArea(rect, false);
+
+	pTerrain->Disappear(true);
+	pTerrain->UnInit();
+
+	if (g_removedTerrain.size() >= kRemovedTerrainLimit)
+		g_removedTerrain.erase(g_removedTerrain.begin());
+
+	g_removedTerrain.push_back(pTerrain);
+}
+
+void SweepCell(CellClass* const pCell)
+{
+	if (!pCell)
+		return;
+
+	// --- ore ---------------------------------------------------------------
+	if (pCell->GetContainedTiberiumIndex() >= 0)
+	{
+		pCell->ReduceTiberium(kTiberiumClearance);
+
+		if (g_terrainLogs < kTerrainLogLimit)
+		{
+			++g_terrainLogs;
+			Log::Debug("[SuddenDeath] clear ore cell [%d,%d]", static_cast<int>(pCell->MapCoords.X),
+				static_cast<int>(pCell->MapCoords.Y));
+		}
+	}
+
+	// --- bridges -----------------------------------------------------------
+	// The engine only collapses a bridge from the MapClass::DamageArea branch a
+	// Wall=yes warhead reaches, and that branch rolls against BridgeStrength
+	// first.  There is exactly one way past the roll: the warhead being the
+	// engine's [CombatDamage] IonCannonWarhead.  Ask the engine to do it with
+	// that warhead at damage 1, then run the aftermath (units on the deck,
+	// craters) through BlowUpBridge as well.
+	if ((pCell->ContainsBridge() || pCell->ContainsBridgeEx()) && !IsBridgeAlreadyBlown(pCell))
+	{
+		WarheadTypeClass* const pIonWarhead =
+			RulesClass::Instance ? RulesClass::Instance->IonCannonWarhead : nullptr;
+
+		if (pIonWarhead)
+		{
+			// The bridge branch only considers a point inside
+			// (Level - 2) * LevelHeight + base < Z <= (Level + 1) * LevelHeight + base.
+			// GetCellCoords() returns the ground-relative height (0 on flat
+			// ground), so the bridge height has to be added for the point to land
+			// on the deck.
+			CoordStruct coords = pCell->GetCellCoords();
+
+			if (pCell->ContainsBridge())
+				coords.Z += CellClass::BridgeHeight;
+
+			g_selfDetonation = true;
+			MapClass::DamageArea(coords, 1, nullptr, pIonWarhead, false, nullptr);
+			g_selfDetonation = false;
+		}
+
+		pCell->BlowUpBridge();
+		g_blownBridges.push_back(pCell);
+
+		if (g_terrainLogs < kTerrainLogLimit)
+		{
+			++g_terrainLogs;
+			Log::Debug("[SuddenDeath] collapse bridge cell [%d,%d]", static_cast<int>(pCell->MapCoords.X),
+				static_cast<int>(pCell->MapCoords.Y));
+		}
+	}
+
+	// --- terrain objects ---------------------------------------------------
+	// Both content chains: GetTerrain(false) walks the normal object list and
+	// GetTerrain(true) the alternate one that a bridge cell keeps aside.
+	for (const bool alt : {false, true})
+		SweepTerrainObject(pCell->GetTerrain(alt));
+}
+
+void ExecuteTerrainQueue()
+{
+	if (g_terrainQueue.empty())
+		return;
+
+	std::vector<TerrainRecord> queue;
+	queue.swap(g_terrainQueue);
+
+	for (const TerrainRecord& record : queue)
+	{
+		// The fork sweeps CellSpread + 0.5, which makes a plain CellSpread=1
+		// warhead cover the ring around the impact cell as well.
+		CellRangeIterator<CellClass>{}(CellClass::Coord2Cell(record.Coords), record.CellSpread + 0.5,
+			[](CellClass* const pCell)
+			{
+				SweepCell(pCell);
+				return true;
+			});
+	}
+}
+
+void LogConfigurationSummaryOnce()
+{
+	if (g_summaryLogged)
+		return;
+
+	g_summaryLogged = true;
+
+	std::size_t normal = 0;
+	std::size_t erase = 0;
+
+	for (const auto& entry : g_warheadModes)
+	{
+		if (entry.second == ExecutionMode::Erase)
+			++erase;
+		else
+			++normal;
+	}
+
+	Log::Info("[SuddenDeath] warhead configuration after rules parsing: %zu warhead(s) "
+		"(normal=%zu, erase=%zu)",
+		g_warheadModes.size(), normal, erase);
+}
+} // namespace
+
+bool HasConfiguredWarhead()
+{
+	return !g_warheadModes.empty();
+}
+
+bool TryGetMode(const WarheadTypeClass* const pWarhead, ExecutionMode& mode)
+{
+	if (!pWarhead || g_warheadModes.empty())
+		return false;
+
+	const auto it = g_warheadModes.find(pWarhead);
+
+	if (it == g_warheadModes.end())
+		return false;
+
+	mode = it->second;
+	return true;
+}
+
+bool IsSuddenDeathWarhead(const WarheadTypeClass* const pWarhead)
+{
+	ExecutionMode ignored = ExecutionMode::Normal;
+	return TryGetMode(pWarhead, ignored);
+}
+
+std::size_t ConfiguredWarheadCount()
+{
+	return g_warheadModes.size();
+}
+
+std::size_t PendingTechnoCount()
+{
+	return g_technoQueue.size();
+}
+
+std::size_t PendingTerrainCount()
+{
+	return g_terrainQueue.size();
+}
+
+void LoadWarheadConfig(WarheadTypeClass* const pWarhead, CCINIClass* const pINIClass)
+{
+	if (!pWarhead || !pINIClass)
+		return;
+
+	const char* const section = pWarhead->ID;
+
+	if (!section || !*section)
+		return;
+
+	if (!EngineIni::ReadBool(pINIClass, section, "SuddenDeath", false))
+	{
+		// A re-parse may drop a configuration that used to be there.
+		g_warheadModes.erase(pWarhead);
+		return;
+	}
+
+	ExecutionMode mode = ExecutionMode::Normal;
+	char modeText[32] = {};
+	EngineIni::ReadString(pINIClass, section, "SuddenDeath.Mode", "normal", modeText, sizeof(modeText));
+
+	if (!ParseExecutionMode(modeText, mode))
+	{
+		Log::Warn("[SuddenDeath] %s: SuddenDeath.Mode='%s' is not valid - expected normal or "
+			"erase; the default normal is in effect",
+			section, modeText);
+		mode = ExecutionMode::Normal;
+	}
+
+	g_warheadModes[pWarhead] = mode;
+
+	Log::Debug("[SuddenDeath] %s: SuddenDeath=yes, mode=%s", section,
+		mode == ExecutionMode::Erase ? "erase" : "normal");
+}
+
+void RegisterHit(
+	TechnoClass* const pTarget,
+	ObjectClass* const pAttacker,
+	HouseClass* const pAttackingHouse,
+	const ExecutionMode mode)
+{
+	if (!pTarget)
+		return;
+
+	// Several projectiles in one frame may reach the same target; the first
+	// record owns the kill (the mode is a property of the warhead, so they agree).
+	const auto existing = std::find_if(g_technoQueue.begin(), g_technoQueue.end(),
+		[pTarget](const TechnoRecord& record)
+		{
+			return record.Target == pTarget;
+		});
+
+	if (existing != g_technoQueue.end())
+		return;
+
+	g_technoQueue.push_back({pTarget, pAttacker, pAttackingHouse, mode});
+
+	if (g_hitLogs < kHitLogLimit)
+	{
+		++g_hitLogs;
+		Log::Debug("[SuddenDeath] queue 0x%08X %s (health %d, mode=%s)", PtrOf(pTarget), IdOf(pTarget),
+			pTarget->Health, mode == ExecutionMode::Erase ? "erase" : "normal");
+	}
+}
+
+void RegisterDetonation(const CoordStruct& coords, const double cellSpread)
+{
+	// The sweep asks the engine to collapse a bridge through DamageArea, and that
+	// call reaches this very hook again.  Its detonation is ours, not a new one.
+	if (g_selfDetonation)
+		return;
+
+	if (g_terrainQueue.size() >= kTerrainQueueLimit)
+	{
+		LogQueueLimitOnce();
+		return;
+	}
+
+	g_terrainQueue.push_back({coords, cellSpread});
+}
+
+void ExecutePending()
+{
+	if (!IsEnabled())
+	{
+		// Defensive: a feature switched off between two frames must not keep
+		// pointers around.
+		g_technoQueue.clear();
+		g_terrainQueue.clear();
+		return;
+	}
+
+	LogConfigurationSummaryOnce();
+	ExecuteTechnoQueue();
+	ExecuteTerrainQueue();
+}
+
+void __cdecl ClearPending()
+{
+	const std::size_t techno = g_technoQueue.size();
+	const std::size_t terrain = g_terrainQueue.size();
+	const std::size_t removedTerrain = g_removedTerrain.size();
+	const std::size_t bridges = g_blownBridges.size();
+
+	g_technoQueue.clear();
+	g_terrainQueue.clear();
+	g_removedTerrain.clear();
+	g_blownBridges.clear();
+	g_selfDetonation = false;
+	g_summaryLogged = false;
+
+	if (techno || terrain || removedTerrain || bridges)
+	{
+		Log::Info("[SuddenDeath] scenario clear: dropped %zu pending techno record(s), %zu terrain "
+			"record(s), %zu removed terrain object(s), %zu collapsed bridge cell(s)",
+			techno, terrain, removedTerrain, bridges);
+	}
+}
+
+bool TechnoHoldsSuddenDeathWeapon(const TechnoClass* const pTechno)
+{
+	if (!pTechno || !pTechno->IsAlive || g_warheadModes.empty())
+		return false;
+
+	TechnoTypeClass* const pType = pTechno->GetTechnoType();
+
+	if (!pType)
+		return false;
+
+	// Read the type's weapon slots directly instead of the engine's GetWeapon:
+	// this runs on every cursor update and slots 0/1 are always present.
+	const bool elite = pTechno->Veterancy.IsElite();
+
+	for (std::size_t index = 0; index < 2; ++index)
+	{
+		WeaponTypeClass* const pWeapon = pType->GetWeapon(index, elite).WeaponType;
+
+		if (!pWeapon || !pWeapon->Warhead || !IsSuddenDeathWarhead(pWeapon->Warhead))
+			continue;
+
+		if (g_cursorLogs < kCursorLogLimit)
+		{
+			++g_cursorLogs;
+			Log::Debug("[SuddenDeath] cursor bypass: %s holds %s", IdOf(pTechno),
+				pWeapon->ID && *pWeapon->ID ? pWeapon->ID : "?");
+		}
+
+		return true;
+	}
+
+	return false;
+}
+} // namespace venture::features::sudden_death

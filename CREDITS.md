@@ -35,6 +35,13 @@
   layers (attack-clamp hook + `InfantryClass::MouseOverObject` wrapper) but takes
   the vtable slot over at run time with a chain to the previous implementation
   instead of the fork's static VTABLE patch.
+- **SuddenDeath warheads** - original fork implementation (the `SuddenDeath` /
+  `SuddenDeath.Mode` warhead keys, the queue -> execute design and the terrain /
+  ore / bridge sweep), ported to VentureLW 2026-11-19.  The platform version
+  reimplements the erase sequence and the terrain removal as pure YRpp virtual
+  calls instead of Phobos' `TechnoExt::KillSelf` / `TerrainTypeExt` helpers, and
+  keeps the two keys in a type-level table that is never saved (the fork stored
+  them in its `WarheadTypeExt`, which changed the savegame shape).
 - **Tactical view zoom** - original fork implementation `51fa3628`, follow-up
   fixes `8c43bd3f` / `ff77ea04` / `65043b38` / `a88c5d48` / `b62f46ce` /
   `70c86561` (2026-10), ported to VentureLW 2026-11-18.  The platform keeps the

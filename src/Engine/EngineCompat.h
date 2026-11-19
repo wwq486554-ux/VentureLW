@@ -20,6 +20,7 @@
 #include <YRPP.h>
 #include <EventClass.h>
 #include <Helpers/Macro.h>
+#include <SpecificStructures.h>
 
 #include "Core/EnginePin.h"
 
@@ -99,6 +100,36 @@ static_assert(sizeof(INIClass::INISection) == 0x44, "INISection ABI changed - re
 // engine's 104-byte data union, so the record layout is part of the binding.
 // (The payload starts at offset 7: type + executed flag + house index + frame.)
 static_assert(sizeof(EventClass) == 111, "EventClass ABI changed - re-check the YRpp pin");
+
+// SuddenDeath binding: the feature reads the warhead keys in the
+// WarheadTypeClass::LoadFromINI epilogue, records hits from the
+// TechnoClass::ReceiveDamage argument block, executes the ordinary kill through
+// the C4 warhead, removes terrain through the engine's own death tail and
+// collapses bridges through the IonCannon branch of MapClass::DamageArea.
+static_assert(sizeof(args_ReceiveDamage) == 0x1C,
+	"args_ReceiveDamage ABI changed - re-check the YRpp pin");
+static_assert(offsetof(ObjectClass, Health) == 0x6C, "ObjectClass::Health moved - re-check the YRpp pin");
+static_assert(offsetof(ObjectClass, IsOnMap) == 0x74, "ObjectClass::IsOnMap moved - re-check the YRpp pin");
+static_assert(offsetof(ObjectClass, InLimbo) == 0x81, "ObjectClass::InLimbo moved - re-check the YRpp pin");
+static_assert(offsetof(ObjectClass, IsAlive) == 0x90, "ObjectClass::IsAlive moved - re-check the YRpp pin");
+static_assert(offsetof(ObjectClass, NextObject) == 0x30,
+	"ObjectClass::NextObject moved - re-check the YRpp pin");
+static_assert(offsetof(TechnoClass, BunkerLinkedItem) == 0x2E4,
+	"TechnoClass::BunkerLinkedItem moved - re-check the YRpp pin");
+static_assert(offsetof(WarheadTypeClass, CellSpread) == 0x124,
+	"WarheadTypeClass::CellSpread moved - re-check the YRpp pin");
+static_assert(offsetof(RulesClass, C4Warhead) == 0xFA8, "RulesClass::C4Warhead moved - re-check the YRpp pin");
+static_assert(offsetof(RulesClass, IonCannonWarhead) == 0xFF0,
+	"RulesClass::IonCannonWarhead moved - re-check the YRpp pin");
+static_assert(offsetof(CellClass, MapCoords) == 0x24, "CellClass::MapCoords moved - re-check the YRpp pin");
+static_assert(CellClass::BridgeHeight == 416,
+	"CellClass::BridgeHeight changed - re-check the YRpp pin");
+static_assert(sizeof(TerrainClass) == 0xE0, "TerrainClass ABI changed - re-check the YRpp pin");
+static_assert(offsetof(TerrainClass, Type) == 0xC8, "TerrainClass::Type moved - re-check the YRpp pin");
+static_assert(offsetof(TerrainClass, IsBurning) == 0xCC,
+	"TerrainClass::IsBurning moved - re-check the YRpp pin");
+static_assert(offsetof(TerrainClass, IsCrumbling) == 0xCD,
+	"TerrainClass::IsCrumbling moved - re-check the YRpp pin");
 
 // Syringe register frame layout (Syringe.h, SYR_VER=2). A wrong sized frame
 // silently corrupts every hook handler.

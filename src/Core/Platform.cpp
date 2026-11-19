@@ -10,6 +10,7 @@
 #include "Core/PlatformConfig.h"
 #include "Core/PlatformGate.h"
 #include "Core/PlatformVersion.h"
+#include "Core/ScenarioClear.h"
 #include "Ext/ExtensionIndex.h"
 
 #include <Syringe.h>
@@ -548,8 +549,16 @@ void OnScenarioClear()
 	else
 		ExtensionIndex::Instance().ResetForScenarioClear();
 	ExtensionIndex::Instance().ClearAll();
-	Log::Info("scenario clear: extension state reset (%zu store(s) registered)",
-		ExtensionIndex::Instance().StoreCount());
+
+	// Feature-owned transient state goes last: an observer may assume the
+	// extension stores are already empty (Core/ScenarioClear.h).  It runs in
+	// both the normal and the savegame-load case - a new scenario must never
+	// inherit pending feature records either way.
+	const std::size_t clearedObservers = scenario_clear::NotifyScenarioClearObservers();
+
+	Log::Info("scenario clear: extension state reset (%zu store(s) registered, %zu feature "
+		"observer(s) notified)",
+		ExtensionIndex::Instance().StoreCount(), clearedObservers);
 }
 
 void OnInvalidatePointer(AbstractClass* const pInvalid, const bool removed)

@@ -11,6 +11,32 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ### Added
 
+- **SuddenDeath warheads** (`[Features] SuddenDeath`, default on; the behaviour
+  itself is opt-in per warhead) - ported from Phobos-LWModified's `SuddenDeath`
+  feature.  A warhead that writes `SuddenDeath=yes` kills whatever its detonation
+  reaches, past damage, armour, `Verses`, `Immune=yes`, Iron Curtain and Force
+  Shield; the hit is recorded inside the damage call and executed at the head of
+  the next logic frame, so the kill never re-enters the object bookkeeping the
+  detonation is walking.  `SuddenDeath.Mode=erase` removes the object instead of
+  killing it (no wreck, no `DeathWeapon`, no revenge weapon, no death animation,
+  no kill credit).  The same detonation sweeps the `CellSpread + 0.5` area: ore
+  is cleared completely, bridges collapse through the engine's IonCannon branch
+  and terrain objects (trees, tiberium pillars) are removed without a health
+  check.  A unit carrying such a weapon gets the Attack cursor on `Immune=yes`
+  targets and may fire at a 0% `Verses` target.  Eight new hooks
+  (`0x701900` / `0x75DEA0` / `0x55B4E1` / `0x6FCB64` / `0x417F63` / `0x51F179` /
+  `0x74049A` / `0x489286`), catalogue 54 -> 62.  **No platform INI keys and no
+  savegame change** - unlike the fork, the keys live in a type-level table and
+  are never serialized.  See `docs/New-or-Enhanced-Logics.md` (English + 中英对照)
+  and the platform chapter of `guides/即死弹头说明.txt`.
+- New platform API `venture::RegisterScenarioClearObserver()` (declared in
+  `src/Core/Platform.h`, engine-free registry in `src/Core/ScenarioClear.h`):
+  a feature registers one `__cdecl` callback that runs after the platform reset
+  its extension state on a scenario clear (new match, retry, main menu, savegame
+  load).  `SuddenDeath` is its first user; `tests/test_scenario_clear.cpp`
+  covers the registry contract (de-duplication, null rejection, order and
+  snapshot semantics).
+
 - **Temporal warheads from any weapon slot** (`[Features] TemporalAnySlot`,
   default on) - ported from Phobos-LWModified commit `c2341b52`.  The engine only
   creates a techno's Temporal instance for a slot-0 `Temporal=yes` warhead and
