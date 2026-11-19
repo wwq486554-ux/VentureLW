@@ -4,6 +4,11 @@
 > VentureCore base.  In this repository the platform identity has already been
 > renamed to `VentureLW`; the instructions remain useful for a future derived
 > platform.
+>
+> **Licence note:** a platform derived from **this** repository must itself be
+> **GPL-3.0** - VentureLW as a whole already is - so the "choose your own
+> licence" guidance below applies only to a platform built from the MIT base
+> alone.  See `docs/Licensing.md`.
 
 This guide walks through turning the VentureCore base into **your own** platform:
 its own name, its own feature modules, its own single DLL.  The model is:
@@ -432,9 +437,10 @@ Before declaring a feature done:
    your platform (update its constants if you renamed anything).
 4. Publish the DLL, optionally the `.pdb`, and your documentation.  Do not publish
    `external/YRpp` or any game files.
-5. State your license.  The base is MIT; your own modules can be any license as
-   long as you keep the MIT notice.  If you copy GPL-3.0 modules, the combined
-   work must be GPL-3.0 - see `docs/Licensing.md`.
+5. State your license.  A platform built from the MIT base alone may choose its
+   own licence, as long as it keeps the MIT notice; a platform derived from
+   *this* repository is already GPL-3.0 and must stay GPL-3.0 (see the licence
+   note at the top and `docs/Licensing.md`).
 
 ## Don't
 

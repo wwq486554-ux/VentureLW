@@ -210,8 +210,9 @@ Host detection is a registry, not a hard-coded table:
   `scripts/linux/check_eol.py` (report) or `scripts/linux/check_eol.py --fix`
   (rewrite offending files).
 * `external/YRpp/` and `external/YRpp.commit` are gitignored - never commit
-  YRpp, it is an external dependency without a license declaration (see
-  `NOTICE.md`).  `external/YRpp.sha256` **is** committed: it is the content
+  YRpp, it is an external dependency with no repository-level licence (one
+  header, `QueueClass.h`, is GPL-3.0-or-later; see `NOTICE.md`).
+  `external/YRpp.sha256` **is** committed: it is the content
   manifest (file hashes only, no YRpp content) and must be regenerated with
   `fetch_yrpp.sh --write-manifest` whenever the pin changes.
 * Build output (`Release/`, `Debug/`, `*.pdb`, `*.obj`, ...) is gitignored; do

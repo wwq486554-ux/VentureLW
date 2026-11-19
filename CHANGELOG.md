@@ -106,6 +106,16 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ### Changed
 
+- **Licensing statement corrected; no code change.**  The repository is now
+  GPL-3.0 only at the licence level: `LICENSE.md` carries the GPL-3.0 text (like
+  `COPYING`) and there is no separate MIT licence file - the VentureCore base's
+  MIT notice is reproduced verbatim in `NOTICE.md`, where MIT requires it to
+  travel with the code.  The YRpp wording no longer claims
+  "no license declaration": one pinned header, `QueueClass.h`, is
+  GPL-3.0-or-later (TS++, CCHyper / ZivDero) and the event sender instantiates
+  its queue `Add()` - lawful because this platform is GPL-3.0.  The platform
+  stays on the v2.1.0 base and does not take the 2.1.1 queue rewrite.  The built
+  DLL, its behaviour, INI keys, hooks and savegame format are unchanged.
 - The base **Example** module no longer owns a feature-level `UnitClass`
   extension store: a game object carries exactly one platform extension, and the
   new shared `TechnoDataExt` extends every techno (units included).  The module

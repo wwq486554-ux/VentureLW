@@ -224,7 +224,9 @@ hands it to the engine sender installed at load time by
 `src/Engine/Hooks.Events.cpp`. That sender queues the frame as a regular engine
 event with `EventClass::OutList.Add(...)`, which is how the reference ecosystem
 raises the custom events it defines: the event then travels the normal event
-transport and is executed on every machine, including the sender's own.
+transport and is executed on every machine, including the sender's own.  (The
+call instantiates the GPL-3.0-or-later `QueueClass.h`; that is lawful here
+because the platform as a whole is GPL-3.0 - see `docs/Licensing.md`.)
 
 Helpers: `WriteFrame` serializes one event into a caller buffer and is the codec
 `Send` uses to build the engine event record; `ReadFrame` validates and decodes

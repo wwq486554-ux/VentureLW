@@ -87,20 +87,27 @@ game directory: the second one is detected and refused by design (see
 
 ## Licensing
 
-* **VentureLW** (the platform assembly and the feature modules added here) is
-  **GPL-3.0** - see `COPYING`.
-* The **VentureCore base** this platform is built from is **MIT** - the original
-  grant is kept verbatim in `LICENSE.md` and recorded in `NOTICE.md`.  MIT code
-  may be combined into a GPL-3.0 work; the MIT notice is retained.
-* YRpp carries no license declaration and is **not** distributed here (external
-  build dependency).  Ares / Phobos / Kratos are optional hosts, never
-  redistributed.  `gamemd.exe` and game assets remain proprietary.
+* **VentureLW as a whole** is **GPL-3.0** - `LICENSE.md` and `COPYING` carry
+  the full licence text; the VentureCore base's MIT notice is reproduced in
+  `NOTICE.md`.
+* The **VentureCore base** this platform is built from is **MIT**; the notice is
+  reproduced verbatim in `NOTICE.md` and retained because MIT requires it with
+  copies of the code.  MIT code may be combined into a GPL-3.0 work - that
+  notice is not an alternative licence for this repository.
+* YRpp has **no repository-level licence** and is **not** distributed here
+  (external build dependency).  One header, `QueueClass.h`, is
+  **GPL-3.0-or-later** (TS++, CCHyper / ZivDero) and this platform instantiates
+  its event-queue `Add()`; that is lawful because the platform itself is
+  GPL-3.0.  Ares / Phobos / Kratos are optional hosts, never redistributed.
+  `gamemd.exe` and game assets remain proprietary.
 * Third-party attribution for ported code lives in `CREDITS.md`.
 
 ## Relationship to the base and to the fork
 
 * Base: [`VentureCore`](https://github.com/wwq486554-ux/VentureCore) v2.1.0
-  (MIT starter base; its own CHANGELOG is the base history).
+  (MIT starter base; its own CHANGELOG is the base history).  The platform stays
+  on v2.1.0 and does not take the 2.1.1 queue rewrite: it is GPL-3.0, so
+  instantiating the copyleft queue header is lawful (see `docs/Licensing.md`).
 * Gameplay source: `Phobos-LWModified`, the Phobos fork the feature modules are
   ported from (GPL-3.0, attribution in `CREDITS.md`).
 * The base documents under `docs/` are inherited and describe the shared

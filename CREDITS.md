@@ -58,3 +58,7 @@
 
 - **YRpp** (engine wrapper headers) and **SyringeEx** (injector) - external
   build/runtime dependencies, not redistributed; see `NOTICE.md`.
+- **TS++** - `QueueClass.h` in the pinned YRpp, `GPL-3.0-or-later`, credited
+  there to **CCHyper** and **ZivDero**.  The platform's event sender instantiates
+  its queue `Add()`; the source is the pinned YRpp revision `c6c522f7`, not a
+  file copied into this repository.  The platform as a whole is GPL-3.0.

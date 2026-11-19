@@ -10,28 +10,69 @@ what is (and is not) distributed here.
 | Component | Distributed here | License / terms | Notes |
 | --- | --- | --- | --- |
 | VentureLW platform code and feature modules | yes | GPL-3.0 (`COPYING`) | Copyright (c) 2026 the VentureLW contributors |
-| VentureCore base source | yes | MIT (`LICENSE.md`) | Copyright (c) 2026 The VentureCore Contributors; MIT notice retained because the base is a substantial part of this work |
+| VentureCore base source | yes | MIT notice retained (reproduced below) | Copyright (c) 2026 The VentureCore Contributors; the notice travels with the base code because MIT requires it |
 | `gamemd.exe` and game assets | no | proprietary (EA / Westwood) | the user must own a copy of Yuri's Revenge 1.001 |
-| YRpp (engine wrapper headers) | no | no license declaration | external build dependency, fetched locally, pinned by commit |
+| YRpp (engine wrapper headers) | no | no repository-level licence; `QueueClass.h` is GPL-3.0-or-later and is instantiated | external build dependency, fetched locally, pinned by commit; the one copyleft file is compiled in, which this platform's GPL-3.0 covers |
 | SyringeEx (`Syringe.exe`) | no | not covered; interface format only | used at run time; only the documented section format is used |
 | Ares | no | per its own project | optional host, detected at run time only |
 | Phobos | no | per its own project | optional host, detected at run time only |
 | Kratos | no | per its own project | optional host, detected at run time only |
 
-## VentureCore base (MIT)
+## VentureCore base (MIT notice)
 
 The base machinery (startup, logging, INI layer, extensions, savegame trailer,
 events, commands, lineage, hosts, build/verification scripts) was taken from the
-VentureCore v2.1.0 repository under the MIT license in `LICENSE.md`.  The MIT
-notice and this file must be kept when the work is redistributed.  VentureLW
-adds its own feature modules under `src/Features/` and the platform identity
-changes described in the CHANGELOG; those additions are GPL-3.0.
+VentureCore v2.1.0 repository under the MIT license.  VentureLW as a whole is
+distributed under GPL-3.0 (`LICENSE.md`, `COPYING`); the notice below is the base
+authors' notice, retained verbatim because MIT requires it to accompany copies of
+their code.  It covers the base files only - not the feature modules under
+`src/Features/` - and it is a third-party notice, not an alternative licence for
+this repository.
+
+```text
+MIT License
+
+Copyright (c) 2026 The VentureCore Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## YRpp
 
 `external/YRpp/` is the YRpp engine wrapper that provides the C++ view of
-`gamemd.exe`.  YRpp carries **no license declaration**; the community uses it in
-practice without a formal grant.  For that reason:
+`gamemd.exe`.  **Repository level: no license file and no stated terms** - the
+community uses the headers in practice without a formal grant.  **File level:
+one header is copyleft.**  In the pinned revision `c6c522f7` exactly one of 337
+source files carries an explicit notice: `QueueClass.h` is **GPL-3.0-or-later**
+(from TS++, credited there to CCHyper and ZivDero) and defines every queue
+member function **inline in the header**.
+
+This platform **does instantiate that header.**  The event sender in
+`src/Engine/Hooks.Events.cpp` queues a frame with `EventClass::OutList.Add(...)`,
+so the compiled DLL contains that implementation.  That is lawful here because
+**VentureLW as a whole is GPL-3.0** (`COPYING`, `LICENSE.md`): GPL-3.0-or-later
+code may be distributed as part of a GPL-3.0 work.  The source of that
+implementation is the pinned YRpp revision
+`c6c522f7b58508588d9a8652c53356e4aef7a96` - public, and fetched locally by
+`scripts/linux/fetch_yrpp.sh`; it is not copied into this repository.
+
+The rest of the dependency is handled as before:
 
 * this repository does **not** redistribute YRpp - `external/YRpp/` and
   `external/YRpp.commit` are excluded by `.gitignore`.  The one committed file
@@ -45,7 +86,12 @@ practice without a formal grant.  For that reason:
 * only public headers and `StaticInits.cpp` from that external checkout are
   compiled - no YRpp source is copied into this repository.
 
-The MIT/GPL grants above therefore cover VentureLW's own code, not YRpp.
+The remaining 336 files state no terms at all.  That is an ecosystem-wide
+position - the official Phobos compiles against the same tree - and this
+repository records it instead of claiming a permission it does not have.  Unlike
+the VentureCore base at v2.1.1, the platform does not replace the queue call:
+staying GPL-3.0 is what keeps it lawful, and the platform is not upgraded to the
+2.1.1 base.
 
 ## SyringeEx
 

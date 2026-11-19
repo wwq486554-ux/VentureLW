@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Fetch (or refresh) the pinned YRpp headers into external/YRpp.
 #
-# YRpp has no license declaration (the community treats it as all-rights-reserved
-# but uses it in practice), so it is NOT vendored in this repository.  It is an
-# external build dependency, pinned by commit in src/Core/EnginePin.h.
+# YRpp has no repository-level licence (the community treats it as
+# all-rights-reserved but uses it in practice; one header, QueueClass.h, carries
+# an explicit GPL-3.0-or-later notice), so it is NOT vendored in this repository.
+# It is an external build dependency, pinned by commit in src/Core/EnginePin.h.
 #
 # This helper is the "no network needed" path used during local development: it
 # copies a YRpp checkout that already exists on the machine.  Once the repository
