@@ -576,7 +576,9 @@ in the following points on purpose:
 - Diagnostics are the platform log: `[Scatter]` Info lines (configuration and
   the resolved global divergence), Warn lines (invalid values, mixed host keys,
   the deferred `IncreaseByRange`, clamped values) and Debug lines for the shaped
-  shots and unconfigured projectile types, the per-shot ones capped per session.
+  shots and unconfigured projectile types; the per-shot ones are capped per
+  projectile type (and by a global session safety cap), so one test projectile
+  cannot silence the other engine paths.
 - All handlers return 0 (the trampoline replays the overridden instruction(s));
   a projectile without `LW.` keys leaves every register and the offset exactly
   as the host produced them.
@@ -860,6 +862,7 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   把结果写回。
 - 诊断走平台日志：`[Scatter]` 的 Info 行（配置与解析出的全局 divergence）、Warn 行
   （非法值、混写宿主键、暂不生效的 `IncreaseByRange`、被夹紧的值），以及 Debug 行
-  （逐发整形结果、未配置的抛射体类型）；逐发那类记录的条数按会话封顶。
+  （逐发整形结果、未配置的抛射体类型）；逐发那类记录**按弹种**封顶（另有全会话
+  总量保险），因此先测的那个弹种不会把其它引擎路径的日志挤掉。
 - 所有 handler 都返回 0（trampoline 重放被覆盖的指令）；没有 `LW.` 键的抛射体，
   寄存器和偏移都保持宿主产出的原样。

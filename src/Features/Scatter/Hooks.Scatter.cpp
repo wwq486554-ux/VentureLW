@@ -87,10 +87,14 @@ using venture::Log;
 namespace
 {
 // Diagnostics: bounded number of per-shot debug lines, so an in-game check can
-// see exactly what the shaping did without flooding a long battle's log.
-constexpr int kShotLogLimit = 60;
+// see exactly what the shaping did without flooding a long battle's log.  The
+// cap is per projectile type (a test that fires one configured projectile type
+// first must not silence the other paths) plus one global safety cap.
+constexpr int kShotLogPerTypeLimit = 20;
+constexpr int kShotLogTotalLimit = 200;
 constexpr int kUnconfiguredNoteLimit = 16;
-int g_shotLogs = 0;
+int g_shotLogTotal = 0;
+std::unordered_map<const BulletTypeClass*, int> g_shotLogCounts;
 std::unordered_map<const BulletTypeClass*, int> g_notedTypes;
 
 // One Fire_At call is a single synchronous pass through the scatter block and
@@ -151,24 +155,52 @@ int ResolveFiringWeaponRange(TechnoClass* const pFirer, const int weaponIndex)
 	return pSlot && pSlot->WeaponType ? pSlot->WeaponType->Range : 0;
 }
 
+// True while this projectile type still has shot-log budget (and the session is
+// under the global safety cap).  Logs the per-type cap line exactly once.
+bool ShouldLogShot(const BulletTypeClass* const pType)
+{
+	if (!pType)
+		return false;
+
+	int& count = g_shotLogCounts[pType];
+
+	if (count >= kShotLogPerTypeLimit)
+	{
+		if (count == kShotLogPerTypeLimit)
+		{
+			++count;
+			Log::Info("[Scatter] shaped-shot debug lines for %s capped at %d", pType->ID,
+				kShotLogPerTypeLimit);
+		}
+
+		return false;
+	}
+
+	if (g_shotLogTotal >= kShotLogTotalLimit)
+	{
+		if (g_shotLogTotal == kShotLogTotalLimit)
+		{
+			++g_shotLogTotal;
+			Log::Info("[Scatter] shaped-shot debug lines capped at %d for this session",
+				kShotLogTotalLimit);
+		}
+
+		return false;
+	}
+
+	++count;
+	++g_shotLogTotal;
+	return true;
+}
+
 // One bounded debug line per shaped shot, printed at the scatter block's exit
 // where the final offset is known.  Only called for shots whose projectile type
 // carries LW.* keys, so an unconfigured battle never fills the log.
 void LogFireAtShot(const int beforeX, const int beforeY, const int afterX, const int afterY,
 	const bool ellipseApplied)
 {
-	if (g_shotLogs >= kShotLogLimit)
-	{
-		if (g_shotLogs == kShotLogLimit)
-		{
-			++g_shotLogs;
-			Log::Info("[Scatter] shaped-shot debug lines capped at %d for this session", kShotLogLimit);
-		}
-
+	if (!ShouldLogShot(g_fireAt.Type))
 		return;
-	}
-
-	++g_shotLogs;
 
 	const ScatterConfig& config = *g_fireAt.Config;
 	const double u = NormalizeDraw(g_fireAt.RawDraw, HostBounds(g_fireAt.Path, g_fireAt.Global));
@@ -208,18 +240,8 @@ void NoteUnconfiguredType(const BulletTypeClass* const pType)
 void LogClassicShot(const BulletTypeClass* const pType, const int engineRadius, const double u,
 	const ShapedRadius& shaped, const double distance, const int range)
 {
-	if (g_shotLogs >= kShotLogLimit)
-	{
-		if (g_shotLogs == kShotLogLimit)
-		{
-			++g_shotLogs;
-			Log::Info("[Scatter] shaped-shot debug lines capped at %d for this session", kShotLogLimit);
-		}
-
+	if (!ShouldLogShot(pType))
 		return;
-	}
-
-	++g_shotLogs;
 
 	Log::Debug("[Scatter] shot path=%s type=%s engine_radius=%d u=%.3f shaped=%d dist=%.0f range=%d "
 			   "-> %s",
