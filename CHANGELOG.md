@@ -9,6 +9,28 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **SuddenDeath: the bridge repair hut of the original-YR rules.**  `[CABHUT]`
+  is both `BridgeRepairHut=yes` and `Immune=yes`, and the engine returns from
+  `BuildingClass::ReceiveDamage` for that combination before
+  `TechnoClass::ReceiveDamage`, so the hit was never recorded.  A ninth hook
+  (`0x4423A3`, size 6) lets a SuddenDeath warhead jump over the pair; the
+  ordinary hit is still nullified by the engine's immunity, and the next-frame
+  execution bypasses it with `IgnoreDefenses`.  (The Mobile-Origin rules the
+  fork was tested with are not `Immune`, so the fork never needed this site.)
+- **SuddenDeath: the 0x701900 argument block.**  The first build used
+  `GET_STACK` on the by-value `args_ReceiveDamage` block, i.e. it dereferenced
+  the damage pointer and never matched a warhead - the feature looked inert in
+  the 2026-11-20 real-machine test.  The access now goes through
+  `Features/SuddenDeath/ReceiveDamageArgs.h` (`LEA_STACK`), pinned by
+  `tests/test_sudden_death_args.cpp`.
+- **SuddenDeath bridge diagnostics.**  With `[Platform] LogLevel=debug` the log
+  now shows each recorded detonation (`detonation cell [...]`, including how
+  many bridge cells lie inside and just outside the sweep radius), each bridge
+  candidate with its cell flags / level / Z, and the `MapClass::DamageArea`
+  result of the collapse attempt.
+
 ### Added
 
 - **SuddenDeath warheads** (`[Features] SuddenDeath`, default on; the behaviour
@@ -23,9 +45,9 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   is cleared completely, bridges collapse through the engine's IonCannon branch
   and terrain objects (trees, tiberium pillars) are removed without a health
   check.  A unit carrying such a weapon gets the Attack cursor on `Immune=yes`
-  targets and may fire at a 0% `Verses` target.  Eight new hooks
+  targets and may fire at a 0% `Verses` target.  Nine new hooks
   (`0x701900` / `0x75DEA0` / `0x55B4E1` / `0x6FCB64` / `0x417F63` / `0x51F179` /
-  `0x74049A` / `0x489286`), catalogue 54 -> 62.  **No platform INI keys and no
+  `0x74049A` / `0x4423A3` / `0x489286`), catalogue 54 -> 63.  **No platform INI keys and no
   savegame change** - unlike the fork, the keys live in a type-level table and
   are never serialized.  See `docs/New-or-Enhanced-Logics.md` (English + 中英对照)
   and the platform chapter of `guides/即死弹头说明.txt`.

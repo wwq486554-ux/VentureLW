@@ -88,14 +88,19 @@ constexpr int kExecuteLogLimit = 8;
 constexpr int kSkipLogLimit = 4;
 constexpr int kTerrainLogLimit = 12;
 constexpr int kCursorLogLimit = 8;
+constexpr int kDetonationLogLimit = 16;
+constexpr int kBridgeLogLimit = 24;
 
 int g_hitLogs = 0;
 int g_executeLogs = 0;
 int g_skipLogs = 0;
 int g_terrainLogs = 0;
 int g_cursorLogs = 0;
+int g_detonationLogs = 0;
+int g_bridgeLogs = 0;
 bool g_summaryLogged = false;
 bool g_queueLimitWarned = false;
+bool g_ionWarheadWarned = false;
 
 // Set while the sweep itself asks the engine to collapse a bridge: the nested
 // MapClass::DamageArea call reaches our own 0x489286 hook, and that detonation
@@ -327,34 +332,53 @@ void SweepCell(CellClass* const pCell)
 	// craters) through BlowUpBridge as well.
 	if ((pCell->ContainsBridge() || pCell->ContainsBridgeEx()) && !IsBridgeAlreadyBlown(pCell))
 	{
+		// The bridge branch only considers a point inside
+		// (Level - 2) * LevelHeight + base < Z <= (Level + 1) * LevelHeight + base.
+		// GetCellCoords() returns the ground-relative height (0 on flat ground),
+		// so the bridge height has to be added for the point to land on the deck.
+		// Only the BridgeHead flag gates that Z test; a BridgeBody cell skips it.
+		CoordStruct coords = pCell->GetCellCoords();
+		const bool isBridgeHead = pCell->ContainsBridge();
+
+		if (isBridgeHead)
+			coords.Z += CellClass::BridgeHeight;
+
+		if (g_bridgeLogs < kBridgeLogLimit)
+		{
+			++g_bridgeLogs;
+			Log::Debug("[SuddenDeath] bridge candidate [%d,%d] flags=0x%08X level=%d head=%d z=%d",
+				static_cast<int>(pCell->MapCoords.X), static_cast<int>(pCell->MapCoords.Y),
+				static_cast<unsigned>(pCell->Flags), static_cast<int>(pCell->Level), isBridgeHead ? 1 : 0,
+				coords.Z);
+		}
+
 		WarheadTypeClass* const pIonWarhead =
 			RulesClass::Instance ? RulesClass::Instance->IonCannonWarhead : nullptr;
 
+		DamageAreaResult result = DamageAreaResult::Missed;
+
 		if (pIonWarhead)
 		{
-			// The bridge branch only considers a point inside
-			// (Level - 2) * LevelHeight + base < Z <= (Level + 1) * LevelHeight + base.
-			// GetCellCoords() returns the ground-relative height (0 on flat
-			// ground), so the bridge height has to be added for the point to land
-			// on the deck.
-			CoordStruct coords = pCell->GetCellCoords();
-
-			if (pCell->ContainsBridge())
-				coords.Z += CellClass::BridgeHeight;
-
 			g_selfDetonation = true;
-			MapClass::DamageArea(coords, 1, nullptr, pIonWarhead, false, nullptr);
+			result = MapClass::DamageArea(coords, 1, nullptr, pIonWarhead, false, nullptr);
 			g_selfDetonation = false;
+		}
+		else if (!g_ionWarheadWarned)
+		{
+			g_ionWarheadWarned = true;
+			Log::Warn("[SuddenDeath] RulesClass::IonCannonWarhead is null - bridge cells "
+				"cannot be collapsed");
 		}
 
 		pCell->BlowUpBridge();
 		g_blownBridges.push_back(pCell);
 
-		if (g_terrainLogs < kTerrainLogLimit)
+		if (g_bridgeLogs < kBridgeLogLimit)
 		{
-			++g_terrainLogs;
-			Log::Debug("[SuddenDeath] collapse bridge cell [%d,%d]", static_cast<int>(pCell->MapCoords.X),
-				static_cast<int>(pCell->MapCoords.Y));
+			++g_bridgeLogs;
+			Log::Debug("[SuddenDeath] collapse bridge cell [%d,%d] result=%d",
+				static_cast<int>(pCell->MapCoords.X), static_cast<int>(pCell->MapCoords.Y),
+				static_cast<int>(result));
 		}
 	}
 
@@ -529,6 +553,38 @@ void RegisterDetonation(const CoordStruct& coords, const double cellSpread)
 	}
 
 	g_terrainQueue.push_back({coords, cellSpread});
+
+	if (g_detonationLogs < kDetonationLogLimit)
+	{
+		++g_detonationLogs;
+		const CellStruct cell = CellClass::Coord2Cell(coords);
+
+		// Count bridge cells twice: inside the radius the sweep will cover and in
+		// a wider ring.  The pair tells a "the bridge was outside the area" case
+		// apart from a "the map's bridge cells are not flagged" case - neither is
+		// distinguishable from a plain "no bridge candidate" log line.
+		int bridgesInSweep = 0;
+		int bridgesNear = 0;
+
+		CellRangeIterator<CellClass>{}(cell, cellSpread + 0.5, [&bridgesInSweep](CellClass* const pCell)
+		{
+			if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+				++bridgesInSweep;
+			return true;
+		});
+
+		CellRangeIterator<CellClass>{}(cell, cellSpread + 2.5, [&bridgesNear](CellClass* const pCell)
+		{
+			if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+				++bridgesNear;
+			return true;
+		});
+
+		Log::Debug("[SuddenDeath] detonation cell [%d,%d] z=%d spread=%.2f bridge in sweep=%d "
+			"near=%d",
+			static_cast<int>(cell.X), static_cast<int>(cell.Y), coords.Z, cellSpread, bridgesInSweep,
+			bridgesNear);
+	}
 }
 
 void ExecutePending()
@@ -560,6 +616,14 @@ void __cdecl ClearPending()
 	g_blownBridges.clear();
 	g_selfDetonation = false;
 	g_summaryLogged = false;
+	g_ionWarheadWarned = false;
+	g_hitLogs = 0;
+	g_executeLogs = 0;
+	g_skipLogs = 0;
+	g_terrainLogs = 0;
+	g_cursorLogs = 0;
+	g_detonationLogs = 0;
+	g_bridgeLogs = 0;
 
 	if (techno || terrain || removedTerrain || bridges)
 	{

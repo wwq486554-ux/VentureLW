@@ -288,6 +288,12 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   extension keys; the checked mod data does not use them, so the behaviour is
   identical with the shipped rules.  If they are ever needed, they are a separate
   small feature.
+- **Bridge repair huts are covered.**  The shipped original-YR `[CABHUT]` is
+  both `BridgeRepairHut=yes` and `Immune=yes`, and the engine returns from
+  `BuildingClass::ReceiveDamage` for that combination before the platform's hit
+  registration can see it; the ninth hook lets a SuddenDeath warhead through
+  (the Mobile-Origin rules the fork was tested with are not `Immune`, so the
+  fork never needed it).
 - **Diagnostics are the platform log**, not a compile-time `constexpr` switch:
   `[SuddenDeath]` Info lines (configuration summary, the first kills, scenario
   clear), Debug lines (per hit, per execution, per swept cell) and Warn lines
@@ -298,14 +304,16 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
 
 ### Implementation notes (platform)
 
-- Eight hooks (`docs/HookCatalogue.md`): `0x701900` records a hit at
+- Nine hooks (`docs/HookCatalogue.md`): `0x701900` records a hit at
   `TechnoClass::ReceiveDamage`; `0x75DEA0` reads the two keys in the
   `WarheadTypeClass::LoadFromINI` epilogue; `0x55B4E1` executes the queues at the
   head of `LogicClass::Update`; `0x6FCB64` lets a SuddenDeath weapon pass the
   armour/`Verses` gate; `0x417F63` / `0x51F179` / `0x74049A` keep the Attack
   cursor on an `Immune=yes` target for aircraft / infantry / units;
-  `0x489286` records a detonation's centre and `CellSpread` at the entry of
-  `MapClass::DamageArea`.
+  `0x4423A3` lets such a warhead reach the ordinary damage path for a bridge
+  repair hut (a building that is both `BridgeRepairHut=yes` and `Immune=yes`
+  returns before `TechnoClass::ReceiveDamage` on its own); `0x489286` records a
+  detonation's centre and `CellSpread` at the entry of `MapClass::DamageArea`.
 - The kill queue is `(target, attacker, house, mode)` with one entry per target
   per frame; the terrain queue is `(coords, CellSpread)`.  Both are transient and
   dropped by the platform's scenario-clear observer (`RegisterScenarioClearObserver`
@@ -383,6 +391,11 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
 - **不播放 `DestroyAnim` / `DestroySound`。** 这两个是 Phobos 的 TerrainType 扩展
   键；已核对的本 MOD 数据没有使用，所以与共载官方 Phobos 时的实际行为一致。将来
   若需要，是独立的小功能。
+- **桥梁维修小屋已覆盖。** 原版 YR 的 `[CABHUT]` 同时是
+  `BridgeRepairHut=yes` 与 `Immune=yes`，引擎会在
+  `BuildingClass::ReceiveDamage` 里对这一组合提前返回，平台的命中登记根本看不到它；
+  第九个 hook 让即死武器跳过这段（fork 测试用的 MO 数据没有 `Immune=yes`，所以
+  fork 没碰到这个问题）。
 - **诊断走平台日志**，不是编译期 `constexpr` 开关：`[SuddenDeath]` 的 Info（配置
   摘要、前几次处决、场景清理）、Debug（逐条命中 / 处决 / 清扫格）、Warn（非法
   Mode）。把 `[Platform] LogLevel` 设为 `debug` 可看到逐条轨迹。
@@ -391,13 +404,14 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
 
 ### 实现说明（平台）
 
-- 八个 hook（`docs/HookCatalogue.md`）：`0x701900` 在
+- 九个 hook（`docs/HookCatalogue.md`）：`0x701900` 在
   `TechnoClass::ReceiveDamage` 前门登记命中；`0x75DEA0` 在
   `WarheadTypeClass::LoadFromINI` 成功尾声读两个键；`0x55B4E1` 在
   `LogicClass::Update` 帧头执行队列；`0x6FCB64` 让即死武器通过护甲 / `Verses` 门；
   `0x417F63` / `0x51F179` / `0x74049A` 分别让飞机 / 步兵 / 载具对 `Immune=yes`
-  目标保留攻击光标；`0x489286` 在 `MapClass::DamageArea` 入口登记爆炸中心与
-  `CellSpread`。
+  目标保留攻击光标；`0x4423A3` 让即死武器绕过桥梁维修小屋的
+  「`BridgeRepairHut=yes` + `Immune=yes` 提前返回」；`0x489286` 在
+  `MapClass::DamageArea` 入口登记爆炸中心与 `CellSpread`。
 - 击杀队列是 `(目标, 攻击者, 来源方, 模式)`，同一帧同一目标只留一条；地形队列是
   `(坐标, CellSpread)`。两者都是场景级瞬态，由平台的场景清理观察者
   （`RegisterScenarioClearObserver`，见 `docs/EngineBindings.md`）清空，所以读档、

@@ -130,6 +130,14 @@ static_assert(offsetof(TerrainClass, IsBurning) == 0xCC,
 	"TerrainClass::IsBurning moved - re-check the YRpp pin");
 static_assert(offsetof(TerrainClass, IsCrumbling) == 0xCD,
 	"TerrainClass::IsCrumbling moved - re-check the YRpp pin");
+// The building-level damage gate: a BridgeRepairHut whose type is also
+// Immune=yes returns from BuildingClass::ReceiveDamage before
+// TechnoClass::ReceiveDamage, so the SuddenDeath hit registration needs both
+// fields (the feature jumps over the pair at 0x4423A3 for its own warheads).
+static_assert(offsetof(TechnoTypeClass, Immune) == 0x233,
+	"TechnoTypeClass::Immune moved - re-check the YRpp pin");
+static_assert(offsetof(BuildingTypeClass, BridgeRepairHut) == 0x16B6,
+	"BuildingTypeClass::BridgeRepairHut moved - re-check the YRpp pin");
 
 // Syringe register frame layout (Syringe.h, SYR_VER=2). A wrong sized frame
 // silently corrupts every hook handler.

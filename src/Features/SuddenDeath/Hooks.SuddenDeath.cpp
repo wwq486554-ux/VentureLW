@@ -145,6 +145,38 @@ DEFINE_HOOK(0x74049A, Venture_SuddenDeath_UnitImmuneCursor, 0x5)
 		: 0;
 }
 
+// BuildingClass::ReceiveDamage: a building whose type is both `BridgeRepairHut=yes`
+// and `Immune=yes` returns from here before it ever reaches
+// TechnoClass::ReceiveDamage, so the platform's 0x701900 hit registration never
+// sees it.  The shipped original-YR `[CABHUT]` (Bridge repair hut) is exactly
+// that combination; the Mobile-Origin rules the fork was tested with drop the
+// `Immune=yes` and never hit this early-out, which is why the fork did not need
+// this site.  A SuddenDeath warhead jumps over both checks and takes the normal
+// damage path: the engine's own immune check still nullifies the ordinary hit,
+// but our 0x701900 handler records the target and the next-frame execution
+// bypasses immunity with IgnoreDefenses.
+//
+// Window `mov cl,[eax+0x16b6]` (the type's BridgeRepairHut flag) ends at
+// 0x4423A9 (`test cl,cl`).  The warhead is the third by-value argument at
+// [esp+0xA8] (Ares' 0x4423E7 hook in this same function reads pDamage at 0xA0,
+// which confirms the frame offsets).  Returning 0x4423E7 skips both the
+// BridgeRepairHut and the Immune check and enters the ordinary path; Ares' own
+// Firestorm hook sits at 0x4423E7 and simply runs after the jump.
+DEFINE_HOOK(0x4423A3, Venture_SuddenDeath_BridgeRepairHutGate, 0x6)
+{
+	enum
+	{
+		NormalDamagePath = 0x4423E7
+	};
+
+	if (!IsEnabled())
+		return 0;
+
+	GET_STACK(WarheadTypeClass*, pWarhead, 0xA8);
+
+	return IsSuddenDeathWarhead(pWarhead) ? NormalDamagePath : 0;
+}
+
 // TechnoClass::GetFireError's armour / Verses gate: the engine has just loaded
 // the target's armour index and is about to compare the warhead's Verses entry
 // against zero, refusing to fire when it is 0%.  A SuddenDeath weapon is
