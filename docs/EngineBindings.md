@@ -196,7 +196,12 @@ the TemporalAnySlot feature, the weapon fields the ROFCurve feature reads
 the object / warhead / terrain fields SuddenDeath reads (`ObjectClass::Health` /
 `InLimbo` / `IsAlive` / `NextObject`, `TechnoClass::BunkerLinkedItem`,
 `WarheadTypeClass::CellSpread`, `RulesClass::C4Warhead` / `IonCannonWarhead`,
-`CellClass::MapCoords` and the `TerrainClass` layout).  The engine-side expected values are documented in
+`CellClass::MapCoords`, `CellClass::IsoTileTypeIndex` and the `TerrainClass`
+layout).  The bridge sweep additionally reads three engine data globals to
+mirror the engine's own bridge-tile test (`0xAA0E28` tileset base, `0xABAD30`
+`BridgeMiddle1`, `0xAA1028` `BridgeMiddle2`); they are runtime data, not class
+fields, and a zero value makes the feature fall back to the flag-only
+pbsnew8 path (`Features/SuddenDeath/BridgeTiles.h`).  The engine-side expected values are documented in
 `docs/Fixed-or-Improved-Logics.md` / `docs/New-or-Enhanced-Logics.md` and were
 cross-checked against the disassembly; they are measured with
 `scripts/linux/abi_probe.sh`.

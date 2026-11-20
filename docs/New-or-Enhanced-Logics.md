@@ -333,6 +333,15 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   `MapClass::DamageArea` at the bridge deck height, then runs `BlowUpBridge` for
   the aftermath; a detonation produced by that nested call is ignored, so the
   sweep cannot feed itself.
+- Bridge **cell detection** is the one place where the pbsnew8 port was not
+  enough: pbsnew8 triggers on `ContainsBridge() || ContainsBridgeEx()` (the
+  bridge cell flags), and some original-YR maps leave those flags unset even
+  though the engine destroys the bridge from a normal shell.  The sweep keeps
+  that condition and also mirrors the engine's own test in
+  `MapClass::DamageArea` (`0x489EC9`): the cell's `IsoTileTypeIndex` minus the
+  bridge tileset base is compared with the `[General]` `BridgeMiddle1` /
+  `BridgeMiddle2` tile groups (`BridgeTiles.h`).  Everything downstream is
+  unchanged pbsnew8 behaviour.
 - No per-object extension, no savegame trailer row, no new platform INI key.
   The warhead table is a feature-local `unordered_map` filled when the rules are
   parsed (same pattern as the ROF curve).
@@ -428,5 +437,12 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
 - 炸桥时以桥面高度向引擎的 `IonCannonWarhead` 请求一次 1 点伤害的
   `MapClass::DamageArea`，再调 `BlowUpBridge` 做善后；这次嵌套调用产生的爆炸会被
   忽略，因此清扫不会自我喂养。
+- **桥格识别**是 pbsnew8 移植唯一需要补逻辑的地方：pbsnew8 用
+  `ContainsBridge() || ContainsBridgeEx()`（桥格标志），而部分原版 YR 地图的桥格
+  不带这些标志，引擎却仍能用常规炮弹拆桥。平台保留该判据，并补上引擎
+  `MapClass::DamageArea`（`0x489EC9`）自己的判据：格子的 `IsoTileTypeIndex` 减去
+  桥瓦片基准后，与 `[General]` 的 `BridgeMiddle1` / `BridgeMiddle2` 瓦片组比较
+  （`BridgeTiles.h`）。其后的 Z+416、IonCannon `DamageArea`、`BlowUpBridge` 全部
+  沿用 pbsnew8。
 - 没有 per-object 扩展、没有存档尾块、没有新增平台 INI 键。弹头表是 feature 私有
   的 `unordered_map`，在解析 rules 时填充（与 ROF 曲线同一模式）。

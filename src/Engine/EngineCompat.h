@@ -122,6 +122,13 @@ static_assert(offsetof(RulesClass, C4Warhead) == 0xFA8, "RulesClass::C4Warhead m
 static_assert(offsetof(RulesClass, IonCannonWarhead) == 0xFF0,
 	"RulesClass::IonCannonWarhead moved - re-check the YRpp pin");
 static_assert(offsetof(CellClass, MapCoords) == 0x24, "CellClass::MapCoords moved - re-check the YRpp pin");
+// SuddenDeath's bridge-cell test mirrors the engine's own tile-type comparison
+// (MapClass::DamageArea 0x489EC9): the cell's IsoTileTypeIndex minus the bridge
+// tileset base (the engine global 0xAA0E28) is compared with the [General]
+// BridgeMiddle1 / BridgeMiddle2 tile groups (0xABAD30 / 0xAA1028).  The globals
+// themselves are runtime data and cannot be asserted; see BridgeTiles.h.
+static_assert(offsetof(CellClass, IsoTileTypeIndex) == 0x38,
+	"CellClass::IsoTileTypeIndex moved - re-check the YRpp pin");
 static_assert(CellClass::BridgeHeight == 416,
 	"CellClass::BridgeHeight changed - re-check the YRpp pin");
 static_assert(sizeof(TerrainClass) == 0xE0, "TerrainClass ABI changed - re-check the YRpp pin");

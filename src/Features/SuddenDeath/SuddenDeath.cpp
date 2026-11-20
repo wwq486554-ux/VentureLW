@@ -20,6 +20,8 @@
 
 #include "Features/SuddenDeath/SuddenDeath.h"
 
+#include "Features/SuddenDeath/BridgeTiles.h"
+
 #include "Engine/EngineCompat.h"
 
 #include <Helpers/Cast.h>
@@ -30,6 +32,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -286,6 +289,50 @@ void ExecuteTechnoQueue()
 	}
 }
 
+// Engine globals the bridge tile comparison needs (see BridgeTiles.h).  They are
+// filled once when the [General] bridge tile groups are loaded (0x545C1E etc.);
+// zero means "not loaded yet" and the helper falls back to the pbsnew8 flags.
+constexpr std::uintptr_t kBridgeTileBaseGlobal = 0xAA0E28;    // tileset base
+constexpr std::uintptr_t kBridgeMiddle1Global = 0xABAD30;     // BridgeMiddle1
+constexpr std::uintptr_t kBridgeMiddle2Global = 0xAA1028;     // BridgeMiddle2
+
+int ReadEngineGlobal(const std::uintptr_t address)
+{
+	return *reinterpret_cast<const int*>(address);
+}
+
+bool g_bridgeTileGlobalsWarned = false;
+
+// pbsnew8's condition plus the engine's own tile-type test (BridgeTiles.h).
+bool IsBridgeCell(const CellClass* const pCell)
+{
+	if (!pCell)
+		return false;
+
+	if (pCell->ContainsBridge() || pCell->ContainsBridgeEx())
+		return true;
+
+	const int tileIndex = pCell->IsoTileTypeIndex;
+	const int base = ReadEngineGlobal(kBridgeTileBaseGlobal);
+	const int middle1 = ReadEngineGlobal(kBridgeMiddle1Global);
+	const int middle2 = ReadEngineGlobal(kBridgeMiddle2Global);
+
+	if (base == 0 || middle1 == 0 || middle2 == 0)
+	{
+		if (!g_bridgeTileGlobalsWarned)
+		{
+			g_bridgeTileGlobalsWarned = true;
+			Log::Warn("[SuddenDeath] the bridge tile-type globals are zero (base=0x%08X "
+				"middle1=0x%08X middle2=0x%08X) - only flag-bearing bridge cells are detected",
+				static_cast<unsigned>(base), static_cast<unsigned>(middle1),
+				static_cast<unsigned>(middle2));
+		}
+		return false;
+	}
+
+	return IsEngineBridgeTileIndex(tileIndex, base, middle1, middle2);
+}
+
 bool IsBridgeAlreadyBlown(const CellClass* const pCell)
 {
 	return std::find(g_blownBridges.begin(), g_blownBridges.end(), pCell) != g_blownBridges.end();
@@ -361,7 +408,7 @@ void SweepCell(CellClass* const pCell)
 	// engine's [CombatDamage] IonCannonWarhead.  Ask the engine to do it with
 	// that warhead at damage 1, then run the aftermath (units on the deck,
 	// craters) through BlowUpBridge as well.
-	if ((pCell->ContainsBridge() || pCell->ContainsBridgeEx()) && !IsBridgeAlreadyBlown(pCell))
+	if (IsBridgeCell(pCell) && !IsBridgeAlreadyBlown(pCell))
 	{
 		// The bridge branch only considers a point inside
 		// (Level - 2) * LevelHeight + base < Z <= (Level + 1) * LevelHeight + base.
@@ -377,10 +424,11 @@ void SweepCell(CellClass* const pCell)
 		if (g_bridgeLogs < kBridgeLogLimit)
 		{
 			++g_bridgeLogs;
-			Log::Debug("[SuddenDeath] bridge candidate [%d,%d] flags=0x%08X level=%d head=%d z=%d",
+			Log::Debug("[SuddenDeath] bridge candidate [%d,%d] flags=0x%08X tile=%d level=%d "
+				"head=%d z=%d",
 				static_cast<int>(pCell->MapCoords.X), static_cast<int>(pCell->MapCoords.Y),
-				static_cast<unsigned>(pCell->Flags), static_cast<int>(pCell->Level), isBridgeHead ? 1 : 0,
-				coords.Z);
+				static_cast<unsigned>(pCell->Flags), pCell->IsoTileTypeIndex,
+				static_cast<int>(pCell->Level), isBridgeHead ? 1 : 0, coords.Z);
 		}
 
 		WarheadTypeClass* const pIonWarhead =
@@ -599,14 +647,14 @@ void RegisterDetonation(const CoordStruct& coords, const double cellSpread)
 
 		CellRangeIterator<CellClass>{}(cell, cellSpread + 0.5, [&bridgesInSweep](CellClass* const pCell)
 		{
-			if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+			if (IsBridgeCell(pCell))
 				++bridgesInSweep;
 			return true;
 		});
 
 		CellRangeIterator<CellClass>{}(cell, cellSpread + 2.5, [&bridgesNear](CellClass* const pCell)
 		{
-			if (pCell && (pCell->ContainsBridge() || pCell->ContainsBridgeEx()))
+			if (IsBridgeCell(pCell))
 				++bridgesNear;
 			return true;
 		});
@@ -657,6 +705,7 @@ void __cdecl ClearPending()
 	g_selfDetonation = false;
 	g_summaryLogged = false;
 	g_ionWarheadWarned = false;
+	g_bridgeTileGlobalsWarned = false;
 	g_forcedBuildingGateTarget = nullptr;
 	g_hitLogs = 0;
 	g_executeLogs = 0;

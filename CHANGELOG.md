@@ -11,6 +11,17 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ### Fixed
 
+- **SuddenDeath: bridges on maps whose cells do not carry the bridge flags.**
+  pbsnew8's trigger (`ContainsBridge() || ContainsBridgeEx()`) is kept, and the
+  sweep now also mirrors the engine's own tile-type test from
+  `MapClass::DamageArea` (`0x489EC9`: the cell's `IsoTileTypeIndex` against the
+  `[General]` `BridgeMiddle1` / `BridgeMiddle2` groups, in
+  `Features/SuddenDeath/BridgeTiles.h`).  The original-YR test map's bridges are
+  tile-type-only, so the ported condition alone found no bridge cell even though
+  conventional shells collapse the same bridge through the engine branch.  The
+  rest of the pbsnew8 recipe (Z + 416 on a `BridgeHead` cell, the
+  `IonCannonWarhead` `DamageArea` call, `BlowUpBridge`, de-duplication) is
+  untouched.  `tests/test_sudden_death_bridge_tiles.cpp` pins the comparison.
 - **SuddenDeath: the bridge repair hut of the original-YR rules.**  `[CABHUT]`
   is both `BridgeRepairHut=yes` and `Immune=yes`, and the engine returns from
   `BuildingClass::ReceiveDamage` for that combination before
