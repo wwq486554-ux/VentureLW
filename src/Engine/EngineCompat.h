@@ -154,13 +154,15 @@ static_assert(offsetof(BuildingClass, Type) == 0x520,
 	"BuildingClass::Type moved - re-check the YRpp pin");
 
 // Scatter core binding (P1/R10): the feature reads the bullet type's scatter
-// flags and the bullet's target/source coordinates, and the engine's Fire_At
-// scatter block writes the scattered offset into crdOffset relative to the
-// captured aim base.  The offsets are exactly the ones the engine's instruction
-// listing uses (TechnoClass::Fire_At 0x6FE67D..0x6FE8EE, BulletClass::MoveTo
+// flags, the bullet's target/source coordinates and (on the classic MoveTo
+// path) its weapon type; the engine's Fire_At scatter block writes the
+// scattered offset into crdOffset relative to the captured aim base.  The
+// offsets are exactly the ones the engine's instruction listing uses
+// (TechnoClass::Fire_At 0x6FE67D..0x6FE8EE, BulletClass::MoveTo
 // 0x468670..0x4688A9) and were
 // measured with scripts/linux/abi_probe.sh against the pinned YRpp.
 static_assert(offsetof(BulletClass, Type) == 0xAC, "BulletClass::Type moved - re-check the YRpp pin");
+static_assert(offsetof(BulletClass, WeaponType) == 0x130, "BulletClass::WeaponType moved - re-check the YRpp pin");
 static_assert(offsetof(BulletClass, SourceCoords) == 0x134, "BulletClass::SourceCoords moved - re-check the YRpp pin");
 static_assert(offsetof(BulletClass, TargetCoords) == 0x140, "BulletClass::TargetCoords moved - re-check the YRpp pin");
 static_assert(offsetof(BulletTypeClass, Arcing) == 0x29B, "BulletTypeClass::Arcing moved - re-check the YRpp pin");

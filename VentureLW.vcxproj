@@ -107,6 +107,7 @@
     <ClInclude Include="src\Features\SuddenDeath\ReceiveDamageArgs.h" />
     <ClInclude Include="src\Features\SuddenDeath\SuddenDeathMode.h" />
     <ClInclude Include="src\Features\Scatter\Scatter.h" />
+    <ClInclude Include="src\Features\Scatter\ScatterMath.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

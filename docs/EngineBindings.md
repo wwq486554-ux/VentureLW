@@ -637,30 +637,61 @@ the level semantics, the measured cost and the hot-path rules.  The binding side
 
 ## Scatter core binding (R10)
 
-The scatter core (P1/R10) reads the bullet type's scatter flags and the bullet's
-aim / target coordinates, and writes back the engine's scatter results.  The
-engine-side facts it depends on, all re-checked against `gamemd.exe` this round:
+The scatter core (P1/R10) reads the bullet type's scatter flags, the bullet's
+aim / target coordinates and (on the classic `MoveTo` path) the bullet's weapon
+type, and writes back the engine's scatter results.  The engine-side facts it
+depends on, all re-checked against `gamemd.exe` this round:
 
 * `TechnoClass::Fire_At` scatter block `0x6FE67D`-`0x6FE8EE`: `BulletTypeClass+0x2A2`
   is `Inaccurate`, `+0x29B` `Arcing`, `+0x2A3` `FlakScatter` and `+0x29E` `Inviso`;
   the unscattered aim offset is at `[esp+0x30..0x38]` and the scattered result is
-  written to `crdOffset` at `[esp+0x94..0x9C]`.  Ares 3.0 hooks `0x6FE709/6` and
-  `0x6FE7FE/5` and returns into `0x6FE71C` / `0x6FE821`, so the platform reads the
-  draw at the post-Ares addresses.
+  written to `crdOffset` at `[esp+0x94..0x9C]`.  While a radius draw window
+  executes, `[esp+0x18]` holds the 3-D muzzle -> aim distance.
+* Visible branch (`FlakScatter && !Inviso`): the radius draw window is
+  `0x6FE71C` (`fld DWORD PTR [esp+0x18]` 4 B + `mov ebx,eax` 2 B); EAX is the
+  host's draw (`RandomRanged(0, Rules.BallisticScatter)` in the unmodified
+  engine).  Ares 3.0 hooks `0x6FE709/6` and returns into this address, so the
+  platform reads the post-Ares draw there and never draws or remaps it a second
+  time.  The engine's distance scaling is the next site, `0x6FE73F`: EAX =
+  `draw * round(distance) / GetWeaponRange`, where the `GetWeaponRange` virtual
+  is the call at `0x6FE732` and its return value is left in ECX (the following
+  `idiv` does not touch it).  `GetWeaponRange` may return the minimum range of
+  the attached turret weapons (measured in the fork's real-machine test), so the
+  platform normalizes its `Divergence` ramp by the firing weapon's own
+  `WeaponTypeClass::Range` and keeps ECX only as the fallback.
+* Legacy `Inaccurate` branch (`!FlakScatter || Inviso`): the radius draw is
+  `0x6FE821`; EAX = `RandomRanged(global / 2, global)`, and the engine has no
+  distance term anywhere on this branch.  Ares 3.0 hooks `0x6FE7FE/5` and
+  returns into this address, so this is the post-Ares entry too.
+* `0x6FE8EE` is the exit of both `Fire_At` branches: `crdOffset`
+  (`[esp+0x94..0x9C]`) is final there and the facing / velocity / firing solution
+  are derived from it right afterwards, which is why the platform applies its 2-D
+  ellipse at this point.
 * `BulletClass::MoveTo` (function at `0x468670`; the fork's handlers call it
   "Unlimbo", but the vtable evidence in this round's audit identifies it as
   `MoveTo`): the classic `FlakScatter && Inviso` branch draws the radius at
-  `0x4687F8` (EAX = `RandomRanged(0, 2 * Rules.BallisticScatter) * round(3D
-  distance) / WeaponType::Range`) and stores the polar result into the target
-  coordinate copy at `[esp+0x44..0x4C]`, not into `crdOffset`.  The platform shapes
-  that path at `0x4687F8` only; its post-scatter sites are owned by Ares
-  (`0x4688BD` always returns `0x468A3F`) and by the official Phobos / Mix obstacle
-  handler (`0x4688A9` returns `0x4688BD` for Inviso bullets).
+  `0x4687F8`: EAX = `RandomRanged(0, 2 * Rules.BallisticScatter) * round(3D
+  distance) / WeaponType::Range`, i.e. the draw window is
+  `[0, 2 * global * distance / range]`.  The official Phobos / Mix / the fork
+  also hook this address and rewrite EAX in their handlers (all return 0), and
+  the following `0x4687FE` store consumes the final EAX; the engine then stores
+  the polar result into the target coordinate copy at `[esp+0x44..0x4C]`, not
+  into `crdOffset`.  The platform is last in that chain: it normalizes the value
+  it receives with `distance` recomputed as
+  `BulletClass::TargetCoords.DistanceFrom(SourceCoords)` and the bullet's
+  `WeaponTypeClass::Range` (both pinned), and shapes the radius only - the
+  post-scatter sites of this path are owned by Ares (`0x4688BD` always returns
+  `0x468A3F`) and by the official Phobos / Mix obstacle handler (`0x4688A9`
+  returns `0x4688BD` for Inviso bullets), so a chained handler there would never
+  run and the 2-D ellipse cannot be applied on this path.
 * Measured field offsets (pinned in `src/Engine/EngineCompat.h`):
-  `BulletClass::Type = 0xAC`, `SourceCoords = 0x134`, `TargetCoords = 0x140`;
-  `BulletTypeClass::Arcing = 0x29B`, `Inviso = 0x29E`, `Inaccurate = 0x2A2`,
-  `FlakScatter = 0x2A3`; `RulesClass::BallisticScatter = 0x1734`.  Reproduce with
-  `scripts/linux/abi_probe.sh`.
+  `BulletClass::Type = 0xAC`, `WeaponType = 0x130`, `SourceCoords = 0x134`,
+  `TargetCoords = 0x140`; `BulletTypeClass::Arcing = 0x29B`, `Inviso = 0x29E`,
+  `Inaccurate = 0x2A2`, `FlakScatter = 0x2A3`;
+  `RulesClass::BallisticScatter = 0x1734`.  `BulletClass::WeaponType` was
+  already printed by `scripts/linux/abi_probe.sh`; this round adds the
+  compile-time assertion because the classic path dereferences the field.
+  Reproduce every value with `scripts/linux/abi_probe.sh`.
 * The bullet type keys are read in the `BulletTypeClass::LoadFromINI` success
   epilogue `0x46C41C/0xA` (ESI = the type, `CCINIClass*` at `[esp+0x90]`); the
   failure path `0x46C429` has no section and is not hooked.  Ares and Kratos hook

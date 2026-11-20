@@ -63,6 +63,32 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ### Added
 
+- **Universal scatter shaping** (`[Features] Scatter`, default on; the behaviour
+  itself is opt-in per projectile) - the platform's own scatter system, keyed by
+  `LW.BallisticScatter.*` in the projectile's own section of `rules(md).ini`.  A
+  projectile that writes any key of the family is shaped; one that writes none
+  keeps the host behaviour bit for bit.  The keys are `Min` / `Max` (cells,
+  x256 = leptons, the radius at full range), `Sigma` (default 0.5 = area-uniform,
+  1.0 = the engine's radial-uniform), `Aspect` (area-preserving true ellipse,
+  default 1), `Divergence` (distance ramp; absent = `[General] LW.Divergence`,
+  default 0.5) and `Chance` (default 1, decided from the host's own draw so no
+  extra random number is consumed).  The radius is remapped on both `Fire_At`
+  branches, the true ellipse is applied at the scatter block's exit (`0x6FE8EE`)
+  before the facing / velocity / firing solution are derived, and the classic
+  `FlakScatter` + `Inviso` `BulletClass::MoveTo` path is radius-shaped only (its
+  post-scatter sites are owned by Ares / the official Phobos / Mix, so the 2-D
+  ellipse cannot run there).  `IncreaseByRange` and its six range keys are read
+  but **not applied** in this build (a projectile that writes them keeps the host
+  scatter, with a warning); `Physical` (B16) and the burst-point scatter arrive
+  later in the round.  Seven hooks - the probe's four (`0x6FE67D` / `0x6FE71C` /
+  `0x6FE821` / `0x6FE8EE`) plus three new sites (`0x6FE73F` / `0x4687F8` /
+  `0x46C41C`), catalogue 67 -> 70 records (63 -> 66 distinct handler names).
+  **No savegame change and no extra random draw** - the configuration is a
+  feature-local table filled when the rules are parsed, and the RNG stream stays
+  the host's.  See `docs/New-or-Enhanced-Logics.md` (English + 中英对照) and
+  `tests/test_scatter_math.cpp` (23 test programs now; the engine-free geometry
+  in `src/Features/Scatter/ScatterMath.h` is covered without a game process).
+
 - **SuddenDeath warheads** (`[Features] SuddenDeath`, default on; the behaviour
   itself is opt-in per warhead) - ported from Phobos-LWModified's `SuddenDeath`
   feature.  A warhead that writes `SuddenDeath=yes` kills whatever its detonation

@@ -361,6 +361,226 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   The warhead table is a feature-local `unordered_map` filled when the rules are
   parsed (same pattern as the ROF curve).
 
+## Universal scatter shaping (`LW.BallisticScatter.*`)
+
+- The platform can take over the scatter of a projectile: the radius the host
+  drew is remapped onto the projectile's own radius window (area-uniform by
+  default), the final offset can be turned into a true, area-preserving
+  ellipse, and the distance ramp is the platform's own.
+  The keys are prefixed `LW.` because this is the platform's own system: the
+  vanilla / host keys (`BallisticScatter.Min` / `.Max`, `Sigma`, `Aspect`,
+  `Divergence`) are never read here and keep belonging to the host.
+- It is **opt-in per projectile**.  A projectile section that contains any one
+  of the `LW.BallisticScatter.*` keys is shaped; a projectile that writes none
+  keeps the host behaviour bit for bit - its shots are left exactly as the host
+  produced them and no other projectile is affected.  The module itself is
+  `[Features] Scatter` (default on): with the switch off every hook returns
+  immediately and no key is read.
+- The shot only has a scatter to shape when the engine enters its own scatter
+  block: `Inaccurate=yes` + `Arcing=yes` for the two `Fire_At` branches, and
+  `FlakScatter=yes` + `Inviso=yes` for the classic `BulletClass::MoveTo` path.
+  The keys on a projectile that never takes one of those paths do nothing.
+- The radius is controlled by `Min` / `Max` (floating point cells, x256 =
+  leptons, the radius at the weapon's full range), `Sigma` (radius-distribution
+  exponent, default 0.5 = area-uniform), `Aspect` (area-preserving ellipse
+  ratio, default 1 = no ellipse) and `Chance` (per-shot scatter probability,
+  default 1).  The distance ramp is controlled by `Divergence`, whose fallback
+  is the module-wide `[General] LW.Divergence` (default 0.5).  The
+  `IncreaseByRange` family is read but **not applied** in this build, and
+  `Physical` (B16) and the burst-point scatter are later commits of the round.
+- The platform draws **no random number of its own**.  `Chance` uses the host's
+  own radius draw as the coin: the draw is uniform, so it passes with
+  probability exactly `Chance`, and a passing draw is divided by `Chance` so it
+  stays uniform on `[0, 1]` (the radius distribution of the scattering shots is
+  unchanged).  A failing roll writes a zero radius: that shot goes to the aim
+  point unscattered.
+- The configuration is read once when `rules(md).ini` is parsed and never
+  changes during a battle; it is not part of the savegame and the feature keeps
+  no per-object state (see "Savegame and multiplayer" below).
+
+In `rulesmd.ini`:
+```ini
+[SOMEPROJECTILE]                        ; ProjectileType
+LW.BallisticScatter.Min=                ; floating point, cells (x256 = leptons), radius at full range; absent = host lower bound
+LW.BallisticScatter.Max=                ; floating point, cells, radius at full range; absent = host upper bound
+LW.BallisticScatter.Sigma=0.5           ; floating point, 0.5 .. 16; 0.5 = area-uniform, 1.0 = the engine's radial-uniform
+LW.BallisticScatter.Aspect=1.0          ; floating point, 0.125 .. 8; area-preserving, >1 = longer across the flight line
+LW.BallisticScatter.Divergence=         ; floating point, not below 0.05; absent = [General] LW.Divergence
+LW.BallisticScatter.Chance=1.0          ; floating point, 0 .. 1; per-shot scatter probability
+LW.BallisticScatter.IncreaseByRange=no  ; boolean; read but NOT applied in this build
+LW.BallisticScatter.MinRange=           ; cells; read for validation only (the segmented interval is not applied yet)
+LW.BallisticScatter.MaxRange=
+LW.BallisticScatter.Min.InMinRange=
+LW.BallisticScatter.Min.InMaxRange=
+LW.BallisticScatter.Max.InMinRange=
+LW.BallisticScatter.Max.InMaxRange=
+
+[General]
+LW.Divergence=0.5                       ; floating point, the global fallback of the per-projectile key
+```
+
+```{note}
+- The gate is the presence of any one `LW.BallisticScatter.*` key in the
+  projectile's section - it does not have to be `Min` or `Max`.  A section that
+  writes only `LW.BallisticScatter.IncreaseByRange=no` is therefore shaped with
+  all defaults.
+- Values outside their documented range are clamped and reported with a
+  `[Scatter]` warning (the warnings are capped per session); a non-finite number
+  falls back to the default.  A `Min` greater than `Max` is swapped with a
+  warning.
+- With no `Min` / `Max`, the radius window is the host's own window for that
+  path: visible `U[0, BallisticScatter]`, legacy
+  `U[BallisticScatter / 2, BallisticScatter]` and classic
+  `U[0, 2 * BallisticScatter]` at full range (`BallisticScatter` is the rules'
+  `[CombatDamage] BallisticScatter`).  `Sigma=1` keeps the host's radial-uniform
+  distribution; the default `Sigma=0.5` is the platform's area-uniform behaviour
+  and is deliberately different.  On the classic path (whose engine
+  `distance / range` factor the platform keeps), `Sigma=1` with no `Min` / `Max`
+  reproduces the engine's radius bit for bit - the unit test pins that.
+- The `Fire_At` distance ramp is clamped at the firing weapon's range: a shot
+  beyond that range keeps the full-range radius.  The classic path keeps the
+  engine's own unclamped linear `distance / range` factor instead.
+- `LW.BallisticScatter.IncreaseByRange=yes` drops the projectile's whole
+  configuration (with a warning) rather than giving it a half-implemented
+  version of the fork's segmented interval - the projectile keeps the host
+  scatter.  The six range keys are read for validation only.
+- `Aspect` and `Divergence` only act at the `Fire_At` sites.  A projectile that
+  only ever takes the classic path accepts them, but they do nothing there.
+- Mixing `LW.BallisticScatter.*` with the host keys (`BallisticScatter.Min` /
+  `.Max`, `Sigma`, `Aspect`, `Divergence`) in the same section drops the whole
+  platform configuration with a warning: the platform normalizes against the
+  host's default draw window, and a host key moves exactly that window, so
+  shaping against it would be wrong.  The projectile then keeps the host
+  scatter.  Remove the old keys when moving a projectile over.
+- `Physical` (B16) is not in this build yet; neither it nor the burst-point
+  scatter is read here - the round's next commits add them.
+```
+
+### The three engine paths
+
+- **Visible `Fire_At` branch** (`Inaccurate` + `Arcing`, `FlakScatter && !Inviso`):
+  the host draw is remapped at `0x6FE71C`, and the engine's own
+  `draw * distance / GetWeaponRange` scaling is replaced at `0x6FE73F` by
+  `shaped * (distance / range) ^ (1 / Divergence)`.  The `range` there is the
+  firing weapon's own `WeaponTypeClass::Range`, not
+  `TechnoClass::GetWeaponRange` - the latter can return the minimum range of the
+  attached turret weapons (measured in the fork's real-machine test).
+- **Legacy `Inaccurate` branch** (`Inaccurate` + `Arcing`,
+  `!FlakScatter || Inviso`): the host draw is remapped at `0x6FE821`, then the
+  platform adds the distance ramp the engine never had on this branch (with the
+  same `Divergence` shape).
+- **Classic `BulletClass::MoveTo` path** (`FlakScatter` + `Inviso`): the radius
+  is shaped at `0x4687F8` only.  The engine's value is
+  `RandomRanged(0, 2 * global) * distance / range`, so the platform normalizes
+  the draw against that window and scales the shaped radius back by the same
+  linear factor; `Divergence` is not stacked on top of it.  **This path gets no
+  2-D ellipse**: its post-scatter sites are owned by Ares (`0x4688BD` always
+  returns `0x468A3F`) and by the official Phobos / Mix obstacle handler
+  (`0x4688A9` returns `0x4688BD` for Inviso bullets), so a chained handler there
+  would never run.
+- **A `FlakScatter` + `Inviso` projectile scatters twice**: the engine runs the
+  `Fire_At` legacy branch first and then scatters again on the classic `MoveTo`
+  path.  The platform shapes both radii, but the true ellipse only exists at the
+  `Fire_At` exit, so the combined offset of such a bullet is an ellipse plus a
+  plain circular offset, not a pure ellipse.  (The vanilla flak AA bullets are
+  the projectiles of this kind; the fork avoids the blend by skipping the
+  ellipse for this flag combination entirely.)
+- **The true ellipse** is applied at the `Fire_At` scatter block's exit
+  (`0x6FE8EE`), i.e. after both radius branches have produced the offset and
+  before the facing / velocity / firing solution are derived from it.  It is
+  area-preserving: with `Aspect > 1` the offset is `sqrt(Aspect)` longer across
+  the flight line and `1 / sqrt(Aspect)` shorter along it (so `Aspect > 1` is
+  longer across the shot, not along it).  The flight line is the shot's
+  horizontal muzzle -> aim direction; a shot straight up or down has no flight
+  line in the 2-D plane and is left circular.
+
+### Co-loads and the old key family
+
+- Supported hosts: Ares + official Phobos.  Ares hooks `0x6FE709` / `0x6FE7FE`
+  and returns into `0x6FE71C` / `0x6FE821`, i.e. it jumps **to** the platform's
+  handlers: the platform reads the draw Ares produced in EAX and never draws or
+  remaps it a second time.
+- The official Phobos (and Mix) also hook the classic radius site `0x4687F8`
+  and rewrite EAX before returning 0.  The platform is last in that chain, so it
+  shapes the host's final radius.
+- Mix's own handlers at `0x6FE71C` / `0x6FE821` are a different case: Mix
+  reshapes the same EAX with its own old keys at the platform's own addresses.
+  Co-loading Mix with this platform's scatter rows is an **unsupported scatter
+  configuration** - both handlers write EAX and the last one in the chain wins.
+- The host keys (`BallisticScatter.Min` / `.Max`, `Sigma`, `Aspect`,
+  `Divergence`) and the platform keys must not be mixed in one projectile
+  section.  Ares / the official Phobos read the host keys at the same sites, and
+  a host key moves the draw window the platform normalizes against; the platform
+  logs a warning and the resulting shaping is undefined-ish.  Remove the old
+  keys when moving a projectile to `LW.BallisticScatter.*`.
+
+### Savegame and multiplayer
+
+- No savegame state: the configuration is a feature-local table filled when
+  `rules(md).ini` is parsed, and nothing is serialized - old and new savegames
+  stay interchangeable, and switching the module on or off never changes a
+  savegame.
+- Zero extra random draws: the platform never calls the RNG; `Chance` reuses the
+  host's draw and every other site only rewrites a value the host already
+  produced.  The random-number stream is therefore exactly the host's.
+- A projectile that writes at least one `LW.` key is shaped and, with the
+  platform defaults, deliberately **not** bit-identical to vanilla: the default
+  `Sigma` is 0.5 (area-uniform) and the ramp defaults to the global `Divergence`
+  0.5.  A projectile that writes no `LW.` key is exactly the host behaviour.
+- Multiplayer was not verified yet for this round.
+
+### Differences from the Phobos-LWModified version
+
+The key names and the intent are the fork's; the platform implementation differs
+in the following points on purpose:
+
+- **`Sigma` default 0.5** (the fork's default is 1.0): the platform's default is
+  area-uniform, the fork's is the engine-like radial-uniform (denser towards the
+  centre).  Write `Sigma=1` to get the fork's default distribution back.
+- **No extra random draws**: the fork redraws the radius on the classic path and
+  draws a coin for its `Chance`; the platform reuses the host's draw for both,
+  so a co-loaded host's random-number stream (and the multiplayer
+  synchronisation it carries) is untouched.
+- **`Min` / `Max` mean the radius at full range on every path**: the fork keeps
+  each engine path's own magnitude (its classic path doubles the values because
+  the engine draws `U[0, 2 * global]` there); the platform normalizes every path
+  onto the same full-range radius.
+- **`IncreaseByRange` is read but not applied yet**: whether the fork's
+  segmented interval is ported is decided after the in-game data; a projectile
+  that writes it keeps the host scatter in this build.
+
+### Implementation notes (platform)
+
+- Seven hooks (`docs/HookCatalogue.md`): `0x46C41C/0xA` reads the projectile's
+  keys in the `BulletTypeClass::LoadFromINI` success epilogue (ESI = the type,
+  `CCINIClass*` at `[esp+0x90]`; the failure path is not hooked; shared with
+  Ares / Kratos / official Phobos / Mix, all return 0); `0x6FE67D/6` captures a
+  shot (projectile type, unscattered aim base, 3-D distance, firing weapon range,
+  engine branch); `0x6FE71C/6` remaps the visible-branch draw (the post-Ares
+  entry); `0x6FE73F/6` replaces the visible-branch distance scaling;
+  `0x6FE821/6` remaps the legacy-branch draw and adds its ramp (the post-Ares
+  entry); `0x6FE8EE/6` applies the true ellipse at the scatter block's exit;
+  `0x4687F8/6` shapes the classic radius (last in the official Phobos / Mix /
+  fork chain).
+- `[General] LW.Divergence` is read through the platform's rules-INI
+  notification (`0x6686C0`, `IniTakeover::RegisterRulesIniObserver`) when the
+  engine has parsed `rules(md).ini` and before the projectile sections are read,
+  so the per-projectile fallback is already resolved.  Every other key is read
+  per projectile section at the INI site above, into a feature-local table keyed
+  by the `BulletTypeClass` pointer; the table is filled once and only read
+  during a battle.
+- The geometry is engine-free and lives in
+  `src/Features/Scatter/ScatterMath.h`, so the whole mapping is unit-tested
+  without the game process (`tests/test_scatter_math.cpp`); the hooks only read
+  the values they need and write the result back.
+- Diagnostics are the platform log: `[Scatter]` Info lines (configuration and
+  the resolved global divergence), Warn lines (invalid values, mixed host keys,
+  the deferred `IncreaseByRange`, clamped values) and Debug lines for the shaped
+  shots and unconfigured projectile types, the per-shot ones capped per session.
+- All handlers return 0 (the trampoline replays the overridden instruction(s));
+  a projectile without `LW.` keys leaves every register and the offset exactly
+  as the host produced them.
+
 ## 即死弹头（弹头级秒杀）
 
 - 弹头可以让它这一发爆炸覆盖到的一切直接死亡：伤害、护甲、`Verses`、血量、
@@ -471,3 +691,175 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
   引擎自己的触发范围之外，本功能不为它另造路径。
 - 没有 per-object 扩展、没有存档尾块、没有新增平台 INI 键。弹头表是 feature 私有
   的 `unordered_map`，在解析 rules 时填充（与 ROF 曲线同一模式）。
+
+## 通用散布整形（`LW.BallisticScatter.*`）
+
+- 平台可以接管某个抛射体的散布：宿主抽出的半径被重新映射到抛射体自己的半径窗口
+  （默认按面积均匀分布），最终偏移可以整成面积等分的真椭圆，距离斜坡也改由平台
+  计算。键名带 `LW.` 前缀，因为这是平台自建体系：原版 / 宿主的键
+  （`BallisticScatter.Min` / `.Max`、`Sigma`、`Aspect`、`Divergence`）在这里
+  一律不读，仍归宿主所有。
+- 这是**按抛射体 opt-in** 的行为：抛射体自己的段里只要出现任意一个
+  `LW.BallisticScatter.*` 键，该抛射体就被整形；一个键都不写的抛射体保持宿主的
+  **逐位**行为——它的射击完全按宿主产出的结果保留，也不影响其它抛射体。模块本身
+  由 `[Features] Scatter`（默认开）控制：关掉后所有 hook 立即返回、不读任何键。
+- 只有引擎真正进入自己的散布块时才有散布可整形：两条 `Fire_At` 分支要求
+  `Inaccurate=yes` + `Arcing=yes`，经典的 `BulletClass::MoveTo` 路径要求
+  `FlakScatter=yes` + `Inviso=yes`。从不走这些路径的抛射体，写了键也不起作用。
+- 半径由 `Min` / `Max`（浮点，单位格，x256 = leptons，含义是武器满射程处的半径）、
+  `Sigma`（半径分布指数，默认 0.5 = 面积均匀）、`Aspect`（面积等分的椭圆比例，
+  默认 1 = 不做椭圆）、`Chance`（单发散布概率，默认 1）控制。距离斜坡由
+  `Divergence` 控制，缺省时取模块级 `[General] LW.Divergence`（默认 0.5）。
+  `IncreaseByRange` 族在本构建**只读不生效**；`Physical`（B16）与爆发点散布是
+  本轮后续提交，本构建不读。
+- 平台**不抽任何随机数**。`Chance` 直接拿宿主自己的半径抽样当硬币：抽样在
+  `[0, 1]` 上均匀，因此通过概率正好是 `Chance`；通过的样本再除以 `Chance`，仍
+  均匀分布在 `[0, 1]` 上（会散布的那些发数的半径分布因此不变）。不通过时写 0
+  半径：那一发不散布，直接飞向瞄准点。
+- 配置在解析 `rules(md).ini` 时读取一次，战斗中不再变化；不进存档，功能本身也
+  没有 per-object 状态（见下文"存档与联机"）。
+
+在 `rulesmd.ini` 中：
+```ini
+[SOMEPROJECTILE]                        ; 抛射体类型（ProjectileType）
+LW.BallisticScatter.Min=                ; 浮点，单位格（x256 = leptons），满射程处半径；不写 = 宿主下界
+LW.BallisticScatter.Max=                ; 浮点，单位格，满射程处半径；不写 = 宿主上界
+LW.BallisticScatter.Sigma=0.5           ; 浮点，0.5 .. 16；0.5 = 面积均匀，1.0 = 引擎的径向均匀
+LW.BallisticScatter.Aspect=1.0          ; 浮点，0.125 .. 8；面积等分，>1 = 沿飞行线更"横"
+LW.BallisticScatter.Divergence=         ; 浮点，不小于 0.05；不写 = [General] LW.Divergence
+LW.BallisticScatter.Chance=1.0          ; 浮点，0 .. 1；单发散布概率
+LW.BallisticScatter.IncreaseByRange=no  ; 布尔；本构建只读不生效
+LW.BallisticScatter.MinRange=           ; 单位格；仅供校验（分段区间本构建不生效）
+LW.BallisticScatter.MaxRange=
+LW.BallisticScatter.Min.InMinRange=
+LW.BallisticScatter.Min.InMaxRange=
+LW.BallisticScatter.Max.InMinRange=
+LW.BallisticScatter.Max.InMaxRange=
+
+[General]
+LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺省值
+```
+
+```{note}
+- 触发门是"抛射体段里出现任意一个 `LW.BallisticScatter.*` 键"——不必是 `Min` 或
+  `Max`。因此只写 `LW.BallisticScatter.IncreaseByRange=no` 的段也会按全默认值被
+  整形。
+- 超出文档范围的值会被夹紧，并以 `[Scatter]` Warn 行上报（警告条数按会话封顶）；
+  非有限数回退到默认值。`Min` 大于 `Max` 时会交换两者并告警。
+- 不写 `Min` / `Max` 时，半径窗口就是该路径宿主的窗口：可见分支
+  `U[0, BallisticScatter]`、旧分支 `U[BallisticScatter / 2, BallisticScatter]`、
+  经典路径满射程处 `U[0, 2 * BallisticScatter]`（`BallisticScatter` 即 rules 的
+  `[CombatDamage] BallisticScatter`）。`Sigma=1` 保持宿主的径向均匀分布；默认的
+  `Sigma=0.5` 是平台声明的面积均匀行为，属于刻意不同。在经典路径上（平台保留
+  引擎自己的 `distance / range` 因子），不写 `Min` / `Max` 且 `Sigma=1` 可以逐位
+  复刻引擎半径——单元测试钉住了这一点。
+- `Fire_At` 的距离斜坡在武器射程处封顶：超出射程的一发只保留满射程半径。经典
+  路径则沿用引擎自己的、不封顶的线性 `distance / range` 因子。
+- `LW.BallisticScatter.IncreaseByRange=yes` 会让该抛射体的整份配置作废（并告警），
+  而不是给它一个"fork 分段区间的半成品"——该抛射体保持宿主散布。六个区间键仅供
+  校验。
+- `Aspect` 与 `Divergence` 只在 `Fire_At` 的站点上生效。只走经典路径的抛射体
+  可以写这两个键，但不起作用。
+- 同一段里把 `LW.BallisticScatter.*` 和宿主键（`BallisticScatter.Min` / `.Max`、
+  `Sigma`、`Aspect`、`Divergence`）混写会让整份平台配置作废（并告警）：平台是拿
+  宿主的默认抽样窗口做归一化的，而宿主键改的正是这个窗口，照它整形会算错；该
+  抛射体保持宿主散布。迁移抛射体时请把旧键删掉。
+- `Physical`（B16）本构建还没有；爆发点散布也一样，两者都要等本轮后续提交，本
+  构建都不读。
+```
+
+### 三条引擎路径
+
+- **可见的 `Fire_At` 分支**（`Inaccurate` + `Arcing`，`FlakScatter && !Inviso`）：
+  宿主抽样在 `0x6FE71C` 被重映射，引擎自己的 `draw * distance / GetWeaponRange`
+  缩放则在 `0x6FE73F` 被替换为
+  `shaped * (distance / range) ^ (1 / Divergence)`。这里的 `range` 取开火武器
+  自己的 `WeaponTypeClass::Range`，不是 `TechnoClass::GetWeaponRange`——后者可能
+  返回挂载炮塔武器的最小射程（fork 的实机测试实测到过这个问题）。
+- **旧 `Inaccurate` 分支**（`Inaccurate` + `Arcing`，`!FlakScatter || Inviso`）：
+  宿主抽样在 `0x6FE821` 被重映射，然后平台补上引擎在该分支上根本没有的距离斜坡
+  （同样按 `Divergence` 成形）。
+- **经典 `BulletClass::MoveTo` 路径**（`FlakScatter` + `Inviso`）：只在
+  `0x4687F8` 整形半径。引擎给的值是
+  `RandomRanged(0, 2 * global) * distance / range`，所以平台按这个窗口归一化抽样，
+  再把整形后的半径乘回同一个线性因子；`Divergence` 不会叠加在它上面。**这条路径
+  不做 2-D 椭圆**：它的散布后站点被 Ares（`0x4688BD` 总是返回 `0x468A3F`）和官方
+  Phobos / Mix 的障碍物 handler（`0x4688A9` 对 `Inviso` 弹返回 `0x4688BD`）占据，
+  串在那里的 handler 永远不会被执行。
+- **`FlakScatter` + `Inviso` 的抛射体会散布两次**：引擎先走 `Fire_At` 旧分支，
+  之后在经典 `MoveTo` 路径上再散布一次。平台把两处半径都整形了，但真椭圆只存在
+  于 `Fire_At` 出口，所以这类子弹的合成偏移是"椭圆 + 一个普通圆偏移"，不是纯椭圆。
+  （原版高射炮的 Flak AA 弹就属于这一类；fork 的做法是对这组 flag 直接跳过椭圆，
+  以避免混合。）
+- **真椭圆**在 `Fire_At` 散布块的出口（`0x6FE8EE`）施加，也就是两条半径分支都已
+  产出偏移之后、朝向 / 速度 / 射击解由它推导之前。它是面积等分的：`Aspect > 1`
+  时偏移沿飞行线的垂直方向被拉长 `sqrt(Aspect)` 倍、沿飞行线方向缩短
+  `1 / sqrt(Aspect)` 倍（所以 `Aspect > 1` 是"横向更长"，不是"沿弹道更长"）。
+  飞行线取该发水平方向的炮口 -> 瞄准点方向；垂直上 / 下射击在 2-D 平面里没有
+  飞行线，保持圆形。
+
+### 共载与旧键族
+
+- 支持的宿主：Ares + 官方 Phobos。Ares 钩 `0x6FE709` / `0x6FE7FE` 并返回（跳）
+  到 `0x6FE71C` / `0x6FE821`，即跳到平台的 handler 上：平台读的是 Ares 抽出的
+  EAX，绝不重抽或二次重映射。
+- 官方 Phobos（以及 Mix）也钩经典半径站点 `0x4687F8`，并在返回 0 前改写 EAX。
+  平台排在这条链的最后，所以整形的是宿主给的最终半径。
+- Mix 在 `0x6FE71C` / `0x6FE821` 上的处理是另一回事：Mix 用自己的一套旧键在平台
+  的同一地址上重塑同一个 EAX。把 Mix 与平台这些散布行共载属于**不支持的散布
+  配置**——两个 handler 都写 EAX，链上最后一个生效。
+- 宿主键（`BallisticScatter.Min` / `.Max`、`Sigma`、`Aspect`、`Divergence`）与
+  平台键**不能混写**在同一抛射体段里。Ares / 官方 Phobos 会在同一批站点读这些
+  宿主键，而宿主键会改变平台归一化所用的抽样窗口，照它整形会算错；因此混写会让
+  该抛射体的整份平台配置作废（并告警），该抛射体保持宿主散布。把抛射体迁到
+  `LW.BallisticScatter.*` 时请删掉旧键。
+
+### 存档与联机
+
+- **0 存档状态**：配置是解析 `rules(md).ini` 时填充的功能私有表，不序列化任何
+  东西——新旧存档可以互换，模块开关也不影响任何存档内容。
+- **0 额外随机抽样**：平台从不调用 RNG；`Chance` 复用宿主抽样，其它站点只改写
+  宿主已经产出的数值。因此随机数流与宿主完全一致。
+- 写了至少一个 `LW.` 键的抛射体即被整形，在平台默认值下**按设计不**与纯原版
+  逐位一致：默认 `Sigma` 是 0.5（面积均匀），距离斜坡默认取全局 `Divergence` 0.5。
+  一个 `LW.` 键都不写的抛射体则与宿主行为完全一致。
+- 联机本轮尚未验证。
+
+### 与 Phobos-LWModified（fork）版本的差异
+
+键名与意图沿用 fork 的；平台实现刻意在以下几点不同：
+
+- **`Sigma` 默认 0.5**（fork 默认 1.0）：平台默认是面积均匀，fork 默认是类似引擎
+  的径向均匀（中心更密）。想要 fork 的默认分布，写 `Sigma=1`。
+- **不额外抽随机数**：fork 在经典路径上重抽半径，还会为 `Chance` 抽一次硬币；
+  平台这两处都复用宿主抽样，所以共载宿主的随机数流（以及它所承载的联机同步）
+  不受影响。
+- **`Min` / `Max` 在每条路径上都表示满射程处半径**：fork 保留各引擎路径自己的
+  量级（它的经典路径因为引擎在那里抽 `U[0, 2 * global]` 而把数值翻倍）；平台把
+  每条路径都归一到同一个满射程半径。
+- **`IncreaseByRange` 只读、暂不生效**：fork 的分段区间是否移植，本轮要看实机
+  数据再定；本构建里写了它的抛射体保持宿主散布。
+
+### 实现说明（平台）
+
+- 七个 hook（`docs/HookCatalogue.md`）：`0x46C41C/0xA` 在
+  `BulletTypeClass::LoadFromINI` 成功尾声读抛射体的键（ESI = 类型，
+  `CCINIClass*` 在 `[esp+0x90]`；失败路径不钩；与 Ares / Kratos / 官方 Phobos /
+  Mix 同址，全部返回 0）；`0x6FE67D/6` 捕获一发（抛射体类型、未散布的瞄准基点、
+  3-D 距离、开火武器射程、引擎分支）；`0x6FE71C/6` 重映射可见分支抽样（Ares 之后
+  的入口）；`0x6FE73F/6` 替换可见分支的距离缩放；`0x6FE821/6` 重映射旧分支抽样并
+  补距离斜坡（Ares 之后的入口）；`0x6FE8EE/6` 在散布块出口施加真椭圆；
+  `0x4687F8/6` 整形经典路径半径（官方 Phobos / Mix / fork 链上的最后一个）。
+- `[General] LW.Divergence` 走平台的 rules-INI 通知（`0x6686C0`，
+  `IniTakeover::RegisterRulesIniObserver`）：引擎解析完 `rules(md).ini`、抛射体段
+  被读取之前就会通知到，所以逐抛射体的缺省值已经就位。其余键都在上面的 INI 站点
+  按抛射体段读取，放进一张以 `BulletTypeClass` 指针为键的功能私有表；表只在解析
+  时填一次，战斗中只读。
+- 几何部分不依赖引擎，放在 `src/Features/Scatter/ScatterMath.h`，所以整套映射不依赖
+  游戏进程即可单元测试（`tests/test_scatter_math.cpp`）；hook 只负责读需要的数值并
+  把结果写回。
+- 诊断走平台日志：`[Scatter]` 的 Info 行（配置与解析出的全局 divergence）、Warn 行
+  （非法值、混写宿主键、暂不生效的 `IncreaseByRange`、被夹紧的值），以及 Debug 行
+  （逐发整形结果、未配置的抛射体类型）；逐发那类记录的条数按会话封顶。
+- 所有 handler 都返回 0（trampoline 重放被覆盖的指令）；没有 `LW.` 键的抛射体，
+  寄存器和偏移都保持宿主产出的原样。

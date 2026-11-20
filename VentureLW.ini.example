@@ -167,14 +167,13 @@ ViewZoom=yes
 SuddenDeath=yes
 
 ; Scatter core (id: scatter): the platform's own projectile scatter system - the
-; `LW.BallisticScatter.*` keys in [Projectile] sections (an area-uniform
-; true-ellipse remap of the host scatter draw, then burst-point / physical
-; offsets for engine-guided missiles; the shaping lands in the next commit of the
-; round).  The behaviour is opt-in per projectile - a projectile without any
-; `LW.*` key keeps the host/vanilla behaviour - so this switch only enables the
-; module.  This build is the round's read-only host-sample probe: the only key it
-; reads is the temporary [Scatter] Probe diagnostic at the bottom of this file.
-; See docs/New-or-Enhanced-Logics.md (English + 中英对照).
+; `LW.BallisticScatter.*` keys in a projectile's own [Projectile] section of
+; rules(md).ini reshape the scatter draw the host produced (radius remap,
+; area-uniform true ellipse, distance ramp; burst-point / physical offsets for
+; engine-guided missiles come later in the round).  The behaviour is opt-in per
+; projectile - a projectile without any `LW.` key keeps the host/vanilla
+; behaviour - so this switch only enables the module.  The R10-1 probe key is
+; gone.  See docs/New-or-Enhanced-Logics.md (English + 中英对照).
 Scatter=yes
 
 ; ---------------------------------------------------------------------------
@@ -263,18 +262,3 @@ ViewZoom.DebugFill=false
 ; Write a performance and geometry report to the log every few seconds (DEBUG
 ; level; performance investigation only).
 ViewZoom.Diagnostics=false
-
-; ---------------------------------------------------------------------------
-; [Scatter] - scatter core module keys (temporary probe phase)
-; ---------------------------------------------------------------------------
-; The module's real key surface is `LW.BallisticScatter.*` in the [Projectile]
-; sections of rules(md).ini (not in this file) and lands in the shaping commit of
-; the round.  The only <Platform>.ini key today is the read-only probe below; it
-; is a temporary R10 diagnostic and is removed when the round closes.
-[Scatter]
-
-; Read-only host-sample probe: yes makes the module's engine hooks log one
-; "[ScatterProbe]" DEBUG line per sampled shot (raw host draw, final offset,
-; projectile type, Ares presence) and change no behaviour.  Requires
-; LogLevel=debug.  Default no.
-Probe=no

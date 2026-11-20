@@ -1,37 +1,55 @@
 #pragma once
 
+#include "Features/Scatter/ScatterMath.h"
+
 // ---------------------------------------------------------------------------
 // Scatter core feature module (P1 / R10) - internal surface.
 //
 // The module implements the platform's own `LW.BallisticScatter.*` scatter
 // system (design: the workspace's `VentureLW弹道与散布体系设计.md`, a document
-// outside this repository).  It is built in three commits:
+// outside this repository).  The whole geometry lives in ScatterMath.h, which is
+// engine-free and unit-tested; this header is the thin surface between the
+// engine hooks (Hooks.Scatter.cpp) and the engine glue (ScatterFeature.cpp).
 //
-//   1. read-only host-sample probe  (this state): the engine hooks observe the
-//      host's raw scatter draws and the final offsets and log them, so the
-//      area-uniform ellipse mapping is derived from measured data instead of a
-//      guess (the design document's §5.1/§5.3).  Nothing changes gameplay.
-//   2. the real shaping: `LW.BallisticScatter.*` keys, radius remap, true
-//      (area-uniform) ellipse and the divergence ramp.
-//   3. the two follow-ups of the work package: burst-point scatter for the
-//      engine-guided ROT/Arm missiles and the physical flight-path offset.
+// State of the round (see the handover manual in the workspace):
 //
-// The probe key (`[Scatter] Probe`) and the probe log lines are temporary: they
-// are removed when the round is closed.
+//   R10-1  read-only host-sample probe (done, verified on the real machine).
+//   R10-2  this commit: the `LW.BallisticScatter.*` key surface, the radius
+//          remap on both Fire_At branches, the true ellipse at the Fire_At exit
+//          and the radius shaping of the classic MoveTo path.
+//   R10-3  burst-point scatter for engine-guided ROT/Arm missiles (0x468DCF).
+//   R10-4  the physical flight offset (B16, BulletDataExt state).
+//   R10-5  documentation, guides and the closing real-machine test.
+//
+// There is no conflict detection and no separate enable switch beyond
+// `[Features] Scatter`: a projectile that writes any `LW.BallisticScatter.*` key
+// is shaped, a projectile that writes none keeps the host behaviour (the
+// platform deliberately re-derives the engine's draw instead of touching the
+// vanilla keys, so a co-loaded Ares / official Phobos reads its own keys
+// untouched).
 // ---------------------------------------------------------------------------
+
+class BulletTypeClass;
+class CCINIClass;
 
 namespace venture::features::scatter
 {
 // The `[Features] Scatter` switch (default on).  When the module is off every
-// hook returns immediately.
+// hook returns immediately and no key is read.
 bool IsEnabled();
 
-// Temporary R10 diagnostic: `[Scatter] Probe=yes` makes the hooks read-only and
-// log one line per sampled shot.  The mapping commits drop this gate.
-bool IsProbeEnabled();
+// The configuration of one projectile type, or null when the type writes no
+// `LW.BallisticScatter.*` key (or the module is off).  Valid from the moment
+// rules(md).ini is parsed; the map is never modified during a battle.
+const ScatterConfig* FindConfig(const BulletTypeClass* pType);
 
-// Whether Ares was detected at startup.  Ares 3.0 hooks 0x6FE709 / 0x6FE7FE and
-// jumps straight into 0x6FE71C / 0x6FE821 with its own radius draw, so the
-// sample has to be read against the right draw interval and the log records it.
-bool HasAres();
+// Resolved `[General] LW.Divergence` (default kGlobalDivergenceDefault).  The
+// per-projectile key wins; this is only the fallback value.
+double GlobalDivergence();
+
+// Reads this projectile's `LW.BallisticScatter.*` keys from the section the
+// engine has just parsed.  Called from the BulletTypeClass::LoadFromINI success
+// epilogue (0x46C41C) by Hooks.Scatter.cpp; exposed here so the hook file has
+// no INI logic of its own.
+void LoadScatterConfigFromIni(BulletTypeClass* pType, CCINIClass* pINI);
 } // namespace venture::features::scatter
