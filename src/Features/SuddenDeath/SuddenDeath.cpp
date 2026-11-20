@@ -101,6 +101,7 @@ int g_terrainLogs = 0;
 int g_cursorLogs = 0;
 int g_detonationLogs = 0;
 int g_bridgeLogs = 0;
+int g_bridgeProbeDumps = 0;
 bool g_summaryLogged = false;
 bool g_queueLimitWarned = false;
 bool g_ionWarheadWarned = false;
@@ -663,10 +664,76 @@ void RegisterDetonation(const CoordStruct& coords, const double cellSpread)
 			ScenarioClass::Instance ? (ScenarioClass::Instance->SpecialFlags.DestroyableBridges ? 1 : 0)
 									: -1;
 
+		// One probe line with the raw cell data the engine's bridge branch uses:
+		// if a map's bridge cells are not recognised, these numbers say whether
+		// the impact cell is a bridge tile at all and how far the tile-index
+		// arithmetic is from the two [General] BridgeMiddle groups.
+		const int bridgeBase = ReadEngineGlobal(kBridgeTileBaseGlobal);
+		const int bridgeMiddle1 = ReadEngineGlobal(kBridgeMiddle1Global);
+		const int bridgeMiddle2 = ReadEngineGlobal(kBridgeMiddle2Global);
+		const CellClass* const pCenter = MapClass::Instance.TryGetCellAt(cell);
+		const int centerTile = pCenter ? pCenter->IsoTileTypeIndex : -1;
+		const int centerOverlay = pCenter ? pCenter->OverlayTypeIndex : -1;
+		const unsigned centerFlags = pCenter ? static_cast<unsigned>(pCenter->Flags) : 0u;
+		const int centerLevel = pCenter ? static_cast<int>(pCenter->Level) : -1;
+		const int centerAdjusted = centerTile - bridgeBase + 1;
+
 		Log::Debug("[SuddenDeath] detonation cell [%d,%d] z=%d spread=%.2f bridge in sweep=%d "
 			"near=%d destroyableBridges=%d",
 			static_cast<int>(cell.X), static_cast<int>(cell.Y), coords.Z, cellSpread, bridgesInSweep,
 			bridgesNear, destroyableBridges);
+		Log::Debug("[SuddenDeath] bridge probe [%d,%d] tile=%d overlay=%d flags=0x%08X level=%d "
+			"base=%d middle1=%d middle2=%d adjusted=%d",
+			static_cast<int>(cell.X), static_cast<int>(cell.Y), centerTile, centerOverlay,
+			centerFlags, centerLevel, bridgeBase, bridgeMiddle1, bridgeMiddle2, centerAdjusted);
+
+		// For the first few detonations also dump the distinct cell shapes in the
+		// 2-cell neighbourhood: if the projectile went off just beside the deck,
+		// the bridge tile/overlay values are still visible here.
+		if (g_bridgeProbeDumps < 4)
+		{
+			++g_bridgeProbeDumps;
+
+			struct ProbeCell
+			{
+				int Tile;
+				int Overlay;
+				unsigned Flags;
+				int Level;
+			};
+
+			ProbeCell seen[8] = {};
+			int seenCount = 0;
+
+			CellRangeIterator<CellClass>{}(cell, 2.5, [&seen, &seenCount](CellClass* const pCell)
+			{
+				if (!pCell || seenCount >= 8)
+					return seenCount < 8;
+
+				for (int index = 0; index < seenCount; ++index)
+				{
+					if (seen[index].Tile == pCell->IsoTileTypeIndex
+						&& seen[index].Overlay == pCell->OverlayTypeIndex
+						&& seen[index].Flags == static_cast<unsigned>(pCell->Flags)
+						&& seen[index].Level == pCell->Level)
+						return true;
+				}
+
+				seen[seenCount].Tile = pCell->IsoTileTypeIndex;
+				seen[seenCount].Overlay = pCell->OverlayTypeIndex;
+				seen[seenCount].Flags = static_cast<unsigned>(pCell->Flags);
+				seen[seenCount].Level = pCell->Level;
+
+				Log::Debug("[SuddenDeath] probe area [%d,%d] tile=%d overlay=%d flags=0x%08X "
+					"level=%d",
+					static_cast<int>(pCell->MapCoords.X), static_cast<int>(pCell->MapCoords.Y),
+					pCell->IsoTileTypeIndex, pCell->OverlayTypeIndex,
+					static_cast<unsigned>(pCell->Flags), static_cast<int>(pCell->Level));
+
+				++seenCount;
+				return seenCount < 8;
+			});
+		}
 	}
 }
 
@@ -714,6 +781,7 @@ void __cdecl ClearPending()
 	g_cursorLogs = 0;
 	g_detonationLogs = 0;
 	g_bridgeLogs = 0;
+	g_bridgeProbeDumps = 0;
 
 	if (techno || terrain || removedTerrain || bridges)
 	{
