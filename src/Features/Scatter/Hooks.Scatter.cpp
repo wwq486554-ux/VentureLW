@@ -124,6 +124,15 @@ namespace
 // cap is per projectile type (a test that fires one configured projectile type
 // first must not silence the other paths) plus one global safety cap.
 constexpr int kShotLogPerTypeLimit = 20;
+
+// Radius of the platform's own detonation test for a physically scattered
+// missile, in leptons.  It matches the engine's proximity-fuse radius
+// (CheckProximityDetonation halves the distance and compares it with 0x20, i.e.
+// 64 leptons): the platform's check runs earlier in the same frame, so it is the
+// primary trigger and the burst point does not depend on the fuse's own
+// bookkeeping.  A fast missile cannot jump over it either - the test uses the
+// closest point on the frame's flight segment, not the frame end points.
+constexpr double kPhysicalDetonateRadius = 64.0;
 constexpr int kShotLogTotalLimit = 200;
 constexpr int kUnconfiguredNoteLimit = 16;
 int g_shotLogTotal = 0;
@@ -360,6 +369,21 @@ void LogPhysicalDetonate(const BulletTypeClass* const pType, const CoordStruct& 
 
 	Log::Debug("[Scatter] physical detonate type=%s at=(%d,%d,%d) aim=(%d,%d,%d) dist=%.0f",
 		pType->ID, at.X, at.Y, at.Z, aim.X, aim.Y, aim.Z, distance);
+}
+
+// The actual burst point of a physically scattered missile, logged at the
+// engine's explosion site whichever trigger fired (the platform's own detonation
+// or the engine's proximity fuse).  This is the line that proves the missile
+// really went off at the aim point.
+void LogPhysicalBurst(const BulletTypeClass* const pType, const CoordStruct& at,
+	const PhysicalScatterState& state)
+{
+	if (!ShouldLogShot(pType))
+		return;
+
+	const CoordStruct aim{state.AimX, state.AimY, state.AimZ};
+	Log::Debug("[Scatter] physical burst type=%s at=(%d,%d,%d) aim=(%d,%d,%d) dist=%.0f",
+		pType->ID, at.X, at.Y, at.Z, aim.X, aim.Y, aim.Z, at.DistanceFrom(aim));
 }
 } // namespace
 
@@ -621,6 +645,17 @@ DEFINE_HOOK(0x468DCF, Venture_Scatter_BurstPoint, 0x6)
 
 	if (!pThis)
 		return 0;
+
+	// Oracle for the physical path: this instruction runs for every Inaccurate
+	// explosion, whichever trigger set it off (the platform's own detonation or
+	// the engine's proximity fuse), so it is the right place to report where a
+	// physically scattered missile actually went off.  The B14 shaping below
+	// deliberately skips a ROT > 0 bullet.
+	if (const PhysicalScatterState* const pPhysical = FetchPhysicalScatter(pThis))
+	{
+		REF_STACK(CoordStruct, burstCoords, 0xC);
+		LogPhysicalBurst(pThis->Type, burstCoords, *pPhysical);
+	}
 
 	const BulletTypeClass* const pType = pThis->Type;
 
@@ -890,7 +925,7 @@ DEFINE_HOOK(0x4677D3, Venture_Scatter_PhysicalDetonate, 0x5)
 	const double closestDistance = closest.DistanceFrom(aim);
 	const double step = std::sqrt(speedSquared);
 
-	if (projection <= 1.0 && closestDistance <= 32.0)
+	if (projection <= 1.0 && closestDistance <= kPhysicalDetonateRadius)
 	{
 		pThis->SetLocation(MapClass::Instance.CoordinatesLegal(closest) ? closest : aim);
 		LogPhysicalDetonate(pThis->Type, pThis->Location, aim, closestDistance);
