@@ -9,6 +9,28 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Scatter core: burst-point scatter for engine-guided missiles.**  A projectile
+  with `ROT > 0` or `Arm > 0` is steered by the engine to the centre of the live
+  target on every frame, so neither engine scatter path can displace where it
+  goes off.  A projectile that is also `Inaccurate=yes` and writes both
+  `LW.BallisticScatter.Min` and `.Max` now gets its final burst point displaced
+  with the same recipe (`Min` / `Max` at full range, `Sigma`, the `Divergence`
+  ramp of the distance actually flown, `Chance`, the area-preserving `Aspect`
+  ellipse along the flight line).  The base is the engine's own burst point, so a
+  `Ranged` early detonation stays where it happened and a `Cluster` projectile
+  keeps the engine's cluster scatter on top of the displaced centre.  This is the
+  only path of the module that draws random numbers: two draws on the detonation
+  frame from the synchronised scenario RNG, so both ends of a multiplayer match
+  compute the same point (the battle's random-number stream differs from vanilla
+  for the projectiles that use it).  The engine's own convergence point
+  `0x468FF4` is occupied by the official Phobos / Mix / fork handlers, so the
+  platform hooks the `Inaccurate` branch's `jne` at `0x468DCF/6` instead.  The
+  projectile still flies to the target centre - only the warhead explodes
+  off-centre.  See `docs/New-or-Enhanced-Logics.md` ("The burst point") and
+  `docs/HookCatalogue.md`.
+
 ### Fixed
 
 - **SuddenDeath: low bridges (the overlay bridge families).**  The tile-type test

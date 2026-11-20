@@ -307,6 +307,117 @@ int __cdecl main()
 		Check(x == 0 && y == 0, "the scatter centre is fixed");
 	}
 
+	// -- the burst point (B14/6A) -------------------------------------------
+	{
+		ScatterConfig config;
+		config.MinSet = true;
+		config.Min = 512;
+		config.MaxSet = true;
+		config.Max = 1024;
+		config.Sigma = 1.0;
+		config.Divergence = 1.0;
+
+		// No explicit interval: the burst path has no host window to fall back
+		// on, so it must not invent one.
+		ScatterConfig unset;
+		Check(!ShapeBurstOffset(unset, 1280.0, 1280.0, 0.5, 0.0, 1, 0).Scatter,
+			"the burst path needs both Min and Max (none written)");
+		unset.MinSet = true;
+		unset.Min = 512;
+		Check(!ShapeBurstOffset(unset, 1280.0, 1280.0, 0.5, 0.0, 1, 0).Scatter,
+			"the burst path needs both Min and Max (only Min written)");
+		unset.MinSet = false;
+		unset.MaxSet = true;
+		unset.Max = 1024;
+		Check(!ShapeBurstOffset(unset, 1280.0, 1280.0, 0.5, 0.0, 1, 0).Scatter,
+			"the burst path needs both Min and Max (only Max written)");
+
+		// At full range with Sigma=1 and angle 0 the offset is straight along X.
+		BurstOffset burst = ShapeBurstOffset(config, 1280.0, 1280.0, 0.5, 0.0, 1, 0);
+		Check(burst.Scatter && burst.ShapedRadius == 768 && burst.Radius == 768,
+			"the burst radius is Min + (Max - Min) * u ^ Sigma");
+		Check(burst.OffsetX == 768 && burst.OffsetY == 0,
+			"drawTurn=0 puts the burst offset on the +X axis");
+
+		// The angle sample is a fraction of a full turn.
+		burst = ShapeBurstOffset(config, 1280.0, 1280.0, 0.5, 0.25, 1, 0);
+		Check(burst.OffsetX == 0 && burst.OffsetY == 768,
+			"drawTurn=0.25 turns the burst offset onto the +Y axis");
+
+		// The Divergence ramp follows the distance actually flown.
+		burst = ShapeBurstOffset(config, 640.0, 1280.0, 0.5, 0.0, 1, 0);
+		Check(burst.Radius == 384, "Divergence=1 halves the radius at half range");
+		config.Divergence = 0.5;
+		burst = ShapeBurstOffset(config, 640.0, 1280.0, 0.5, 0.0, 1, 0);
+		Check(burst.Radius == 192, "Divergence=0.5 squares the half-range factor");
+		config.Divergence = 1.0;
+
+		// An unresolved weapon range leaves the shaped radius unscaled (same
+		// documented fallback as the Fire_At ramp).
+		burst = ShapeBurstOffset(config, 640.0, 0.0, 0.5, 0.0, 1, 0);
+		Check(burst.Scatter && burst.Radius == 768,
+			"an unresolved range leaves the burst radius unscaled");
+
+		// A zero distance has no ramp and therefore no scatter.
+		Check(!ShapeBurstOffset(config, 0.0, 1280.0, 0.5, 0.0, 1, 0).Scatter,
+			"a zero distance disables the burst offset");
+
+		// Sigma=0.5 pushes the same draw outwards (area uniform).
+		ScatterConfig uniform = config;
+		uniform.Sigma = 0.5;
+		burst = ShapeBurstOffset(uniform, 1280.0, 1280.0, 0.25, 0.0, 1, 0);
+		Check(burst.Radius == 768, "Sigma=0.5 maps the 25% draw to half the radius");
+
+		// Chance uses the radius draw as the coin: a failing draw scatters
+		// nothing, a passing one is rescaled to keep the distribution uniform.
+		ScatterConfig lucky;
+		lucky.MinSet = true;
+		lucky.Min = 100;
+		lucky.MaxSet = true;
+		lucky.Max = 500;
+		lucky.Sigma = 1.0;
+		lucky.Chance = 0.5;
+		Check(!ShapeBurstOffset(lucky, 1280.0, 1280.0, 0.6, 0.0, 1, 0).Scatter,
+			"a burst draw above Chance does not scatter");
+		burst = ShapeBurstOffset(lucky, 1280.0, 1280.0, 0.3, 0.0, 1, 0);
+		Check(burst.Scatter && burst.Radius == 340,
+			"a passing burst draw is rescaled by 1/Chance (0.3 -> 0.6 of the window)");
+
+		// Min = Max is a fixed radius.
+		ScatterConfig fixed = config;
+		fixed.Min = 512;
+		fixed.Max = 512;
+		Check(ShapeBurstOffset(fixed, 1280.0, 1280.0, 0.1, 0.0, 1, 0).Radius == 512
+				&& ShapeBurstOffset(fixed, 1280.0, 1280.0, 0.9, 0.0, 1, 0).Radius == 512,
+			"Min=Max gives every burst the same radius");
+
+		// The Aspect ellipse turns with the flight line, like the other paths.
+		ScatterConfig oval = lucky;
+		oval.Chance = 1.0;
+		oval.MinSet = true;
+		oval.Min = 100;
+		oval.MaxSet = true;
+		oval.Max = 100; // a fixed radius keeps the arithmetic readable
+		oval.Aspect = 4.0;
+		burst = ShapeBurstOffset(oval, 1280.0, 1280.0, 0.0, 0.0, 1, 0);
+		Check(burst.OffsetX == 50 && burst.OffsetY == 0,
+			"Aspect=4 halves the burst offset along the flight line");
+		burst = ShapeBurstOffset(oval, 1280.0, 1280.0, 0.0, 0.25, 1, 0);
+		Check(burst.OffsetX == 0 && burst.OffsetY == 200,
+			"Aspect=4 doubles the burst offset across the flight line");
+		burst = ShapeBurstOffset(oval, 1280.0, 1280.0, 0.0, 0.0, 0, 1);
+		Check(burst.OffsetX == 200 && burst.OffsetY == 0,
+			"the burst ellipse follows the flight direction");
+		burst = ShapeBurstOffset(oval, 1280.0, 1280.0, 0.0, 0.0, 0, 0);
+		Check(burst.OffsetX == 100 && burst.OffsetY == 0,
+			"a degenerate flight direction leaves the burst offset circular");
+
+		// Out-of-range angle samples are clamped instead of wrapping.
+		burst = ShapeBurstOffset(config, 1280.0, 1280.0, 0.5, 2.0, 1, 0);
+		Check(burst.OffsetX == 768 && burst.OffsetY == 0,
+			"a drawTurn above 1 is clamped to a full turn");
+	}
+
 	// -- tuning value normalization -----------------------------------------
 	{
 		Check(Near(NormalizeScatterAspect(0.0), kAspectMin), "an Aspect below 0.125 is clamped");

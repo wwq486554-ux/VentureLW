@@ -102,18 +102,20 @@ The table is machine-read.  Keep these rules when editing it:
 | 0x6FE821 | 0x6 | Venture_Scatter_LegacyDraw | Scatter core: the legacy `Inaccurate` branch's host draw is in EAX; remap it onto `LW.BallisticScatter.Min/Max/Sigma`, apply the Chance roll and add the distance ramp the engine never had on this branch, then write the final radius back | Feature. Window `mov edx,ds:0x00A8B230` (6 B) ends at 0x6FE827 (`push 0x7FFFFFFE`); returning 0 replays the load, and the engine stores EAX as the radius at 0x6FE82E with only `push`es in between. EAX = `RandomRanged(global/2, global)` in the unmodified engine, or Ares 3.0's draw: Ares hooks 0x6FE7FE/5 and returns 0x6FE821, i.e. it jumps **to this address**, so the handler treats EAX as the upstream draw and never re-draws. Mix declares the same address/size (same co-load caveat as the visible row: Mix is an unsupported scatter co-load) |
 | 0x6FE8EE | 0x6 | Venture_Scatter_FireAtExit | Scatter core: exit of the engine's Fire_At scatter block - the scattered offset is final in crdOffset; apply the area-preserving Aspect ellipse around the captured aim base, aligned with the shot's horizontal direction, before the facing / velocity / firing solution are derived from it | Feature. Window `mov edx,[ecx+0x2DC]` (6 B) ends at 0x6FE8F4 (`test edx,edx`); returning 0 replays the load. ECX = BulletTypeClass*, crdOffset at [esp+0x94..0x9C]; on the block's early-outs the value still equals the captured aim base and the handler is a no-op (the shot was not captured). Free in the audited Ares / official Phobos / Kratos / Mix tables; the fork declares this address for its own aspect shaping, but the fork is a lineage-exclusive build that cannot be co-loaded |
 | 0x4687F8 | 0x6 | Venture_Scatter_ClassicRadius | Scatter core: the classic FlakScatter + Inviso path's radius is in EAX; remap it onto the projectile's `LW.BallisticScatter.Min/Max/Sigma` (radius only - this path has no free post-scatter site for the 2-D ellipse) | Feature. Window `lea ecx,[edx+0x218]` (6 B) ends at 0x4687FE (`mov [esp+0x24],eax`), and that store consumes the handler's EAX as the radius, so returning 0 with EAX rewritten is the whole edit. EBX = BulletClass*, EAX = the host's final radius (`RandomRanged(0, 2 * global) * round(distance) / WeaponType::Range` in the unmodified engine). The official Phobos / Mix / the fork hook this same address and rewrite EAX (all return 0); this DLL is last in the chain, so the handler normalizes the host's final value against the engine's window [0, 2 * global * distance / range]. The post-scatter sites of this path cannot host the ellipse: Ares owns 0x4688BD (always returns 0x468A3F) and the official Phobos / Mix obstacle handler at 0x4688A9 returns 0x4688BD for Inviso bullets, so a chained handler there would never run. Ares / Kratos do not hook this address |
+| 0x468DCF | 0x6 | Venture_Scatter_BurstPoint | Scatter core: move the burst point of an engine-guided ROT / Arm missile (B14/6A) - the engine steers such a projectile to the centre of the live target on every frame, so its launch offset cannot survive; the detonation frame is the only place a scatter can be applied | Feature. Window `jne 0x468FF4` (6 B) ends at 0x468DD5 (`mov ecx,[esi+0x10C]`); it is the `Inaccurate` branch that skips every target snap, and ZF comes from the `test cl,cl` at 0x468DCD with CL = `Type->Inaccurate` (0x468DC7), so returning 0 replays the jump. ESI = BulletClass*; the local burst coordinate is [esp+0xC..0x14], seeded from `bullet->Location` at 0x468D96..0x468DAC - the function at 0x468D80 has no frame pointer, so every slot is ESP-relative and ESP here is still the post-prologue value (the engine call at 0x468DB4 cleans its own argument and no push happens before the window). Returning 0 replays the conditional jump itself: SyringeEx's `ZFPreservation` (the flags) and `ReladdrInstructionFixup` (the relative target) are both required by this platform at startup (`src/Core/Platform.cpp`), so the replayed `jne` keeps the engine's ZF and still lands on 0x468FF4. The handler rewrites X/Y and keeps Z, so the Airburst (0x46909A) and Cluster (0x469008) paths and `Detonate` all consume the new point; a Cluster projectile layers the engine's own cluster scatter on top of the displaced centre. It draws two numbers from `ScenarioClass::Instance->Random` on the detonation frame (radius fraction, then angle fraction) - the only random draws the module takes - so both ends of a multiplayer match compute the same point. The engine's own `0x468FF4` convergence point cannot be used instead: the official Phobos / Mix and the fork all hook it with handlers that return non-zero (0x469008 / 0x46909A), and this DLL is last in the chain. Free in the audited Ares / Kratos / official Phobos / Mix tables; the fork hooks only 0x468E61 / 0x468E9F / 0x468FF4. Gates: `Inaccurate` && (`ROT > 0` || `Arm > 0`) && `!Arcing` && `!Inviso` && both `LW.BallisticScatter.Min` and `.Max` written (the burst path has no host draw window to fall back on; a partial pair is reported when the section is read) |
 | 0x46C41C | 0xa | Venture_Scatter_BulletType_INI | Scatter core: read the projectile's `LW.BallisticScatter.*` keys into the feature-local projectile-type table when `BulletTypeClass::LoadFromINI` succeeds | Feature. Window `pop esi`(1) + `mov al,1`(2) + `pop ebx`(1) + `add esp,0x84`(6) ends at 0x46C426 (`ret 4`), so returning 0 replays the successful epilogue; ESI = the BulletTypeClass (set at 0x46BEEF, unchanged) and the CCINIClass* is at [esp+0x90]. Same site as Ares / Kratos (both return paths) and official Phobos / Mix (success path), all size 0xA and all returning 0, so the platform chains with them; the failure path 0x46C429 has no section to read and is deliberately not hooked |
 
-Seventy hook records, sixty-six distinct hook handler names
+Seventy-one hook records, sixty-seven distinct hook handler names
 (`Venture_Example_UnitClass_DTOR` is installed at two addresses and
 `Venture_UI_DrawRadialIndicator_LargeEllipse` at two addresses, both with
 `DEFINE_HOOK_AGAIN`); the twenty-two ViewZoom records added by the R3
 migration and the nine SuddenDeath records added by the R4 migration all use
-unique `DEFINE_HOOK` handler names. The seven `Venture_Scatter_*` records are the
-R10 scatter-core round: its first commit was a read-only host-sample probe, and its
+unique `DEFINE_HOOK` handler names. The eight `Venture_Scatter_*` records are the
+R10 scatter-core round: its first commit was a read-only host-sample probe, its
 second commit (R10-2) replaced the handler bodies with the real
 `LW.BallisticScatter.*` shaping and added the three sites the shaping needs (the
-probe's addresses and sizes are unchanged).
+probe's addresses and sizes are unchanged), and its third (R10-3) added the
+burst-point site 0x468DCF - the round's only path that draws random numbers.
 
 The twenty-two `Venture_ViewZoom_*` rows are the R3 platform migration of the
 fork's view-zoom feature.  Their addresses, sizes and covered instructions are
@@ -144,13 +146,18 @@ this handler; the checked mod data uses no shields, and the documented fallback
 is to move the row to the free 0x6FCB56/6 site.
 
 
-The seven `Venture_Scatter_*` rows are the R10 scatter-core round.  The first
+The eight `Venture_Scatter_*` rows are the R10 scatter-core round.  The first
 commit (R10-1) installed four read-only probe hooks at 0x6FE67D / 0x6FE71C /
 0x6FE821 / 0x6FE8EE and measured the host's real draw on the supported game build
 before any mapping was written (the design forbids guessing the sample shape); the
 second commit (R10-2) replaced the probe bodies with the real
 `LW.BallisticScatter.*` shaping and added the three sites the shaping needs
-(0x6FE73F / 0x4687F8 / 0x46C41C) while keeping the probe's addresses and sizes.
+(0x6FE73F / 0x4687F8 / 0x46C41C) while keeping the probe's addresses and sizes;
+the third (R10-3) added the burst-point site 0x468DCF, which rewrites
+`BulletClass::Explode`'s local burst coordinate just before the `Inaccurate`
+branch jumps over the target snap - the only free place to displace an
+engine-guided ROT / Arm projectile, because 0x468FF4 (where the fork does it) is
+occupied by handlers that return non-zero.
 The site choice follows the co-load audit: Ares 3.0 hooks 0x6FE709 and 0x6FE7FE and
 jumps with a non-zero return into 0x6FE71C / 0x6FE821, so the platform reads the
 draw at the post-Ares addresses and never draws a second time; 0x6FE67D, 0x6FE73F

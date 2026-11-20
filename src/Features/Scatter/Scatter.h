@@ -14,10 +14,13 @@
 // State of the round (see the handover manual in the workspace):
 //
 //   R10-1  read-only host-sample probe (done, verified on the real machine).
-//   R10-2  this commit: the `LW.BallisticScatter.*` key surface, the radius
-//          remap on both Fire_At branches, the true ellipse at the Fire_At exit
-//          and the radius shaping of the classic MoveTo path.
-//   R10-3  burst-point scatter for engine-guided ROT/Arm missiles (0x468DCF).
+//   R10-2  the `LW.BallisticScatter.*` key surface, the radius remap on both
+//          Fire_At branches, the true ellipse at the Fire_At exit and the radius
+//          shaping of the classic MoveTo path (done, verified on the real
+//          machine).
+//   R10-3  this commit: burst-point scatter for engine-guided ROT/Arm missiles
+//          (0x468DCF, ShapeBurstOffset) - the one path that draws its own random
+//          numbers, on the detonation frame from the synchronised RNG.
 //   R10-4  the physical flight offset (B16, BulletDataExt state).
 //   R10-5  documentation, guides and the closing real-machine test.
 //

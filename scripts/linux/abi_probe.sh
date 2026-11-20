@@ -87,9 +87,10 @@ int __cdecl main()
 	SHOW_OFF(TechnoClass, Owner);
 
 	// Fields bound by the scatter core (P1/R10): the Fire_At scatter block reads
-	// the bullet type flags and writes crdOffset relative to the aim base, and the
-	// classic Unlimbo path scatters the target coordinate.  The values are pinned
-	// in src/Engine/EngineCompat.h.
+	// the bullet type flags and writes crdOffset relative to the aim base, the
+	// classic MoveTo path scatters the target coordinate, and the burst-point path
+	// (B14/6A) gates on ROT / Arm and rewrites Explode's local burst coordinate.
+	// The values are pinned in src/Engine/EngineCompat.h.
 	SHOW_OFF(BulletClass, Type);
 	SHOW_OFF(BulletClass, TargetCoords);
 	SHOW_OFF(BulletClass, SourceCoords);
@@ -97,6 +98,8 @@ int __cdecl main()
 	SHOW_OFF(BulletTypeClass, Inviso);
 	SHOW_OFF(BulletTypeClass, Inaccurate);
 	SHOW_OFF(BulletTypeClass, FlakScatter);
+	SHOW_OFF(BulletTypeClass, ROT);
+	SHOW_OFF(BulletTypeClass, Arm);
 	SHOW_OFF(RulesClass, BallisticScatter);
 
 	SHOW(REGISTERS);

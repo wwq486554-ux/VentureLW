@@ -51,6 +51,28 @@
 //                     feature-local type table.  Ares / Kratos / official
 //                     Phobos / Mix hook the same site and all return 0.
 //
+//   BulletClass::Explode burst point (0x468DCF)
+//     0x468DCF / 6 - the Inaccurate branch's `jne 0x468FF4`, i.e. the jump that
+//                     skips every target snap.  The engine steers a ROT / Arm
+//                     projectile to the centre of the live target on every
+//                     frame, so its launch offset cannot survive and the burst
+//                     point is the only place that can be displaced (B14/6A).
+//                     The handler only acts for such a projectile when it is
+//                     also `Inaccurate` (otherwise the engine's snap code would
+//                     overwrite the point again), not `Arcing` / `Inviso` (both
+//                     already scatter elsewhere) and when it writes both
+//                     `LW.BallisticScatter.Min` and `.Max` (the burst path has
+//                     no host draw window to fall back on).  It rewrites
+//                     [esp+0xC..0x14] and returns 0, so the replayed jump carries
+//                     the new point into the Airburst / Cluster / Detonate
+//                     paths.  This is the only site of the module that draws
+//                     random numbers: two draws from the scenario's synchronised
+//                     RNG (ScenarioClass::Instance->Random) on the detonation
+//                     frame.  The fork's 0x468FF4 site cannot be used: the
+//                     official Phobos / Mix / fork handlers there always return
+//                     non-zero and this DLL is last in the chain, so a handler
+//                     there never runs.
+//
 // Every handler returns 0, i.e. the trampoline replays the overridden
 // instruction(s).  The handlers only touch behaviour when the shooting
 // projectile's own section carries `LW.BallisticScatter.*` keys; otherwise they
@@ -71,14 +93,17 @@
 
 using venture::features::scatter::ApplyFireAtDistance;
 using venture::features::scatter::ApplyScatterAspect;
+using venture::features::scatter::BurstOffset;
 using venture::features::scatter::FindConfig;
 using venture::features::scatter::HostBounds;
 using venture::features::scatter::IsEnabled;
 using venture::features::scatter::LoadScatterConfigFromIni;
 using venture::features::scatter::NormalizeDraw;
 using venture::features::scatter::NormalizeScatterAspect;
+using venture::features::scatter::NormalizeScatterChance;
 using venture::features::scatter::ScatterConfig;
 using venture::features::scatter::ScatterPath;
+using venture::features::scatter::ShapeBurstOffset;
 using venture::features::scatter::ShapeClassicRadius;
 using venture::features::scatter::ShapeFireAtDraw;
 using venture::features::scatter::ShapedRadius;
@@ -247,6 +272,40 @@ void LogClassicShot(const BulletTypeClass* const pType, const int engineRadius, 
 			   "-> %s",
 		PathName(ScatterPath::Classic), pType->ID, engineRadius, u, shaped.Radius, distance, range,
 		shaped.Scatter ? "shaped" : "no scatter (chance miss)");
+}
+
+// One bounded debug line for a burst point (B14/6A): the displaced point, the
+// sample that produced it, or why the engine's own point was kept.  The cap is
+// the shared per-projectile-type one of the shot lines.
+void LogBurstShot(const BulletTypeClass* const pType, const double u, const double distance,
+	const int range, const ScatterConfig& config, const BurstOffset& burst, const int afterX,
+	const int afterY)
+{
+	if (!ShouldLogShot(pType))
+		return;
+
+	const double chance = NormalizeScatterChance(config.Chance);
+
+	if (burst.ChanceMiss)
+	{
+		Log::Debug("[Scatter] burst type=%s u=%.3f chance=%.2f dist=%.0f range=%d -> no scatter "
+				   "(chance miss)",
+			pType->ID, u, chance, distance, range);
+		return;
+	}
+
+	if (!burst.Scatter)
+	{
+		Log::Debug("[Scatter] burst type=%s u=%.3f chance=%.2f dist=%.0f range=%d -> no scatter "
+				   "(zero radius)",
+			pType->ID, u, chance, distance, range);
+		return;
+	}
+
+	Log::Debug("[Scatter] burst type=%s u=%.3f chance=%.2f shaped=%d final=%d dist=%.0f range=%d "
+			   "divergence=%.2f aspect=%.2f offset=(%d,%d) at=(%d,%d)",
+		pType->ID, u, chance, burst.ShapedRadius, burst.Radius, distance, range, config.Divergence,
+		NormalizeScatterAspect(config.Aspect), burst.OffsetX, burst.OffsetY, afterX, afterY);
 }
 } // namespace
 
@@ -473,6 +532,82 @@ DEFINE_HOOK(0x4687F8, Venture_Scatter_ClassicRadius, 0x6)
 	LogClassicShot(pType, engineRadius, u, shaped, distance, range);
 
 	R->EAX(static_cast<DWORD>(shaped.Scatter ? shaped.Radius : 0));
+	return 0;
+}
+
+// BulletClass::Explode, the Inaccurate branch's `jne 0x468FF4` (the jump over
+// every target snap): the engine steers a ROT / Arm projectile to the centre of
+// the live target on every frame, so the burst point is the only place a scatter
+// can survive (B14/6A).  The local burst coordinate is [esp+0xC..0x14] (seeded
+// from bullet->Location at 0x468D96; the function has no frame pointer).  The
+// handler rewrites it and returns 0, so the replayed jump carries the new point
+// into the Airburst / Cluster / Detonate paths.  Replaying the conditional jump
+// is safe because the platform refuses to run without SyringeEx's
+// ZFPreservation (the engine's ZF) and ReladdrInstructionFixup (the relative
+// target); see src/Core/Platform.cpp.
+//
+// The gates are structural:
+//   * Inaccurate - the engine only skips the target snap when the flag is set;
+//     with it clear the snap code below would overwrite the point again;
+//   * ROT > 0 || Arm > 0 - the engine-guided kinds this path exists for;
+//   * !Arcing && !Inviso - both already take an engine scatter path;
+//   * both LW.BallisticScatter.Min and .Max written - the burst path has no host
+//     draw window to fall back on (ScatterFeature warns about a partial pair).
+// The two random draws are taken on the detonation frame from the scenario's
+// synchronised RNG, so both ends of a multiplayer match compute the same point.
+DEFINE_HOOK(0x468DCF, Venture_Scatter_BurstPoint, 0x6)
+{
+	if (!IsEnabled())
+		return 0;
+
+	GET(BulletClass*, pThis, ESI);
+
+	if (!pThis)
+		return 0;
+
+	const BulletTypeClass* const pType = pThis->Type;
+
+	// Every bullet explosion reaches this instruction, so the cheap flags are
+	// checked before the configuration lookup.
+	if (!pType || !pType->Inaccurate || (pType->ROT <= 0 && pType->Arm <= 0) || pType->Arcing
+		|| pType->Inviso)
+		return 0;
+
+	const ScatterConfig* const pConfig = FindConfig(pType);
+
+	if (!pConfig || !pConfig->MinSet || !pConfig->MaxSet)
+		return 0;
+
+	if (!ScenarioClass::Instance)
+		return 0;
+
+	REF_STACK(CoordStruct, coords, 0xC);
+
+	const double distance = coords.DistanceFrom(pThis->SourceCoords);
+
+	if (!(distance > 0.0))
+		return 0;
+
+	const int range = pThis->WeaponType ? pThis->WeaponType->Range : 0;
+
+	// Two draws, radius fraction first and angle fraction second; both clients
+	// run this exact sequence on the same frame.
+	Randomizer& random = ScenarioClass::Instance->Random;
+	const double u = random.RandomDouble();
+	const double turn = random.RandomDouble();
+
+	const CoordStruct direction = coords - pThis->SourceCoords;
+	const BurstOffset burst = ShapeBurstOffset(*pConfig, distance, static_cast<double>(range), u, turn,
+		direction.X, direction.Y);
+
+	if (burst.Scatter)
+	{
+		coords.X += burst.OffsetX;
+		coords.Y += burst.OffsetY;
+	}
+
+	LogBurstShot(pType, u, distance, range, *pConfig, burst, coords.X, coords.Y);
+
 	return 0;
 }
 

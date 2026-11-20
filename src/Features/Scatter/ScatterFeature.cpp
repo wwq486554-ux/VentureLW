@@ -28,8 +28,13 @@
 //                                    behaviour until the round decides on the
 //                                    segmented interval (a warning says so)
 //
-// `LW.BallisticScatter.Physical` (B16) and the burst-point scatter (B14/6A) are
-// the round's next commits and are not read here.
+// `LW.BallisticScatter.Physical` (B16) is the round's next commit and is not
+// read here.  The burst-point scatter (B14/6A) is in this commit: the same keys
+// above, applied to the burst point of an engine-guided ROT / Arm missile (the
+// hook lives in Hooks.Scatter.cpp; the geometry, ShapeBurstOffset, in
+// ScatterMath.h).  Unlike the three shaping paths it requires *both* Min and Max
+// to be written - it has no host draw window to fall back on - and a partial pair
+// is reported with a warning when the section is read.
 //
 // Enabling is data-driven, with no separate switch and no conflict detection:
 // a projectile section that contains any one of the keys above is shaped; a
@@ -72,6 +77,7 @@ constexpr int kConfigLogLimit = 16;
 int g_tuningWarns = 0;
 int g_mixWarns = 0;
 int g_deferredWarns = 0;
+int g_burstWarns = 0;
 int g_configLogs = 0;
 
 // Any one of these makes the projectile take part in the platform's shaping.
@@ -410,6 +416,21 @@ void LoadScatterConfigFromIni(BulletTypeClass* const pType, CCINIClass* const pI
 	{
 		g_configs.erase(pType);
 		return;
+	}
+
+	// The burst-point path (B14/6A) has no host draw window, so it needs both
+	// bounds written.  Report a ROT / Arm projectile that only writes one of them
+	// once - otherwise the pair looks active while the burst point stays at the
+	// engine's value.
+	const bool burstCandidate = pType->Inaccurate && !pType->Arcing && !pType->Inviso
+		&& (pType->ROT > 0 || pType->Arm > 0);
+
+	if (burstCandidate && (!config.MinSet || !config.MaxSet) && g_burstWarns < kWarningLimit)
+	{
+		++g_burstWarns;
+		Log::Warn("[Scatter] %s: writes only one of %s / %s; the burst-point scatter of a ROT/Arm "
+				  "missile needs both, so its burst point keeps the engine value",
+			section, kKeyMin, kKeyMax);
 	}
 
 	LogConfig(section, config);

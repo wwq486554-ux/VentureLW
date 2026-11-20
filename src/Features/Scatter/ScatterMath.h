@@ -34,9 +34,17 @@
 //      post-processing site; the classic path has none (see the round's
 //      handover manual, section 3.2), so it is radius-shaped only.
 //
+// The burst point (B14/6A, ShapeBurstOffset) is a different entry point: a
+// ROT / Arm projectile is guided by the engine to the centre of the live target
+// every frame, so its launch offset cannot survive - the burst point is displaced
+// instead, and that displacement is the one place in the module that draws its
+// own random numbers (two draws on the detonation frame, from the synchronised
+// scenario RNG; see the section at the bottom of this header).
+//
 // Delta against the fork (Phobos-LWModified), all of it deliberate:
-//   * zero new random draws on every path - the fork redraws the radius at the
-//     classic site and draws a coin for its Chance key;
+//   * zero new random draws on the three shaping paths - the fork redraws the
+//     radius at the classic site and draws a coin for its Chance key; the burst
+//     point draws like the fork does (it cannot reuse a host draw);
 //   * Sigma defaults to 0.5 (area uniform) instead of the fork's 1.0 (radial
 //     uniform, i.e. denser in the middle);
 //   * Min/Max mean "the radius at the weapon's full range" on every path; the
@@ -72,6 +80,9 @@ inline constexpr double kGlobalDivergenceDefault = 0.5;
 inline constexpr double kDivergenceMin = 0.05;
 
 inline constexpr double kChanceDefault = 1.0;
+
+// One full turn, for the burst-point angle sample.
+inline constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 // One cell is 256 leptons (Unsorted::LeptonsPerCell); the cap is a sanity bound
 // on the tuning values, not a gameplay limit: 65535 leptons is ~256 cells, far
@@ -450,5 +461,86 @@ inline void ApplyScatterAspect(int& offsetX, int& offsetY, const int directionX,
 
 	offsetX = static_cast<int>(std::lround(alongNew * ux - lateralNew * uy));
 	offsetY = static_cast<int>(std::lround(alongNew * uy + lateralNew * ux));
+}
+
+// --- the burst point (B14/6A) ----------------------------------------------
+//
+// A ROT / Arm projectile is steered by the engine towards the centre of the live
+// target on every frame, so neither Fire_At branch can displace where it goes
+// off: they only write the launch velocity and the guidance then follows the
+// target straight back to its centre.  The burst point is therefore the only
+// place that can be moved without touching the guidance source (the fork's
+// B14/6A, kept).  It is also the only path of this module that draws random
+// numbers of its own: the two samples are taken on the detonation frame from the
+// synchronised scenario RNG, so both clients of a multiplayer match compute the
+// same point.  A battle that uses this path therefore sees a different
+// random-number stream than one that does not (documented; not a desync - both
+// ends run the same draw).
+//
+// The recipe is the one of the shaped paths: radius = Min + (Max - Min) * u ^
+// Sigma, scaled by the Divergence ramp of the distance actually flown, turned
+// into a polar offset by the angle sample and expressed in the flight frame by
+// the Aspect ellipse.  `drawU` and `drawTurn` are uniform on [0, 1]; the hook
+// maps the two RNG draws onto them (`drawTurn` is a fraction of a full turn).
+// The burst path requires Min *and* Max to be written: it has no host draw
+// window to fall back on, so a projectile that writes only one of the two keeps
+// the engine's burst point.
+
+struct BurstOffset
+{
+	bool Scatter = false;
+	bool ChanceMiss = false; // the Chance roll failed (otherwise !Scatter means a zero radius)
+	int ShapedRadius = 0;    // radius from the Min/Max window, before the distance ramp
+	int Radius = 0;          // the polar radius actually used (after the ramp)
+	int OffsetX = 0;
+	int OffsetY = 0;
+};
+
+inline BurstOffset ShapeBurstOffset(const ScatterConfig& config, const double distance,
+	const double range, const double drawU, const double drawTurn, const int directionX,
+	const int directionY)
+{
+	BurstOffset result;
+
+	if (!config.MinSet || !config.MaxSet)
+		return result;
+
+	// No host window is involved on this path: the resolved view is built from
+	// the projectile's own pair and the normalized tuning values only.
+	ResolvedScatter resolved;
+	resolved.Target = NormalizeScatterBounds({config.Min, config.Max});
+	resolved.Sigma = NormalizeScatterSigma(config.Sigma);
+	resolved.Aspect = NormalizeScatterAspect(config.Aspect);
+	resolved.Divergence = NormalizeScatterDivergence(config.Divergence);
+	resolved.Chance = NormalizeScatterChance(config.Chance);
+
+	// The radius draw doubles as the Chance coin, exactly like the Fire_At paths
+	// (`Chance` cannot cost an extra draw here without changing the stream twice).
+	const ChanceRoll roll = ApplyChance(std::clamp(drawU, 0.0, 1.0), resolved.Chance);
+
+	if (!roll.Passed)
+	{
+		result.ChanceMiss = true;
+		return result;
+	}
+
+	const int shaped = RadiusFromDraw(roll.Draw, resolved.Target, resolved.Sigma);
+	const int radius = ScaleRadius(shaped, FireAtDistanceFactor(distance, range, resolved.Divergence));
+
+	if (radius < 1)
+		return result;
+
+	const double angle = std::clamp(drawTurn, 0.0, 1.0) * kTwoPi;
+	int offsetX = static_cast<int>(std::lround(std::cos(angle) * static_cast<double>(radius)));
+	int offsetY = static_cast<int>(std::lround(std::sin(angle) * static_cast<double>(radius)));
+
+	ApplyScatterAspect(offsetX, offsetY, directionX, directionY, resolved.Aspect);
+
+	result.Scatter = true;
+	result.ShapedRadius = shaped;
+	result.Radius = radius;
+	result.OffsetX = offsetX;
+	result.OffsetY = offsetY;
+	return result;
 }
 } // namespace venture::features::scatter

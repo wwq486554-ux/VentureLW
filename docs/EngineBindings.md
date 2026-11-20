@@ -684,10 +684,27 @@ depends on, all re-checked against `gamemd.exe` this round:
   `0x468A3F`) and by the official Phobos / Mix obstacle handler (`0x4688A9`
   returns `0x4688BD` for Inviso bullets), so a chained handler there would never
   run and the 2-D ellipse cannot be applied on this path.
+* The burst-point path (B14/6A) runs in `BulletClass::Explode` (`0x468D80`-
+  `0x4690AC`; the function has **no frame pointer**, every slot is ESP-relative).
+  `0x468DC1`-`0x468DCF` is `if (Type->Inaccurate) jne 0x468FF4`: the jump skips
+  every target snap and lands on the single convergence point where the local
+  coordinate is handed to the Airburst / Cluster / `Detonate` paths.  The
+  platform hooks that `jne` itself (6 B; free in the audited Ares / Kratos /
+  official Phobos / Mix tables) and rewrites the local coordinate at
+  `[esp+0xC..0x14]` (seeded from `bullet->Location` at `0x468D96..0x468DAC`;
+  ESP at the window is still the post-prologue value).  The ellipse direction is
+  the horizontal chord from the engine burst point back to
+  `BulletClass::SourceCoords`, the distance ramp uses the distance actually
+  flown, and the range is `BulletClass::WeaponType->Range`.  `0x468FF4` (where
+  the fork applies the same offset) is **not usable**: the official Phobos / Mix
+  and the fork hook it with handlers that return non-zero, and this DLL is last
+  in the chain, so a handler there would never run.
 * Measured field offsets (pinned in `src/Engine/EngineCompat.h`):
   `BulletClass::Type = 0xAC`, `WeaponType = 0x130`, `SourceCoords = 0x134`,
   `TargetCoords = 0x140`; `BulletTypeClass::Arcing = 0x29B`, `Inviso = 0x29E`,
-  `Inaccurate = 0x2A2`, `FlakScatter = 0x2A3`;
+  `Inaccurate = 0x2A2`, `FlakScatter = 0x2A3`, `ROT = 0x2DC`, `Arm = 0x2F0`
+  (the engine gates its guidance on `[type+0x2DC] > 0` at `0x4668CB` and seeds
+  the arm timer from `[type+0x2F0]` at `0x468A5D`);
   `RulesClass::BallisticScatter = 0x1734`.  `BulletClass::WeaponType` was
   already printed by `scripts/linux/abi_probe.sh`; this round adds the
   compile-time assertion because the classic path dereferences the field.

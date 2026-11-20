@@ -387,7 +387,8 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   default 1).  The distance ramp is controlled by `Divergence`, whose fallback
   is the module-wide `[General] LW.Divergence` (default 0.5).  The
   `IncreaseByRange` family is read but **not applied** in this build, and
-  `Physical` (B16) and the burst-point scatter are later commits of the round.
+  `Physical` (B16) is a later commit of the round.  The burst-point scatter
+  (B14/6A, see "The burst point" below) is in this build and uses the same keys.
 - The platform draws **no random number of its own**.  `Chance` uses the host's
   own radius draw as the coin: the draw is uniform, so it passes with
   probability exactly `Chance`, and a passing draw is divided by `Chance` so it
@@ -452,8 +453,9 @@ LW.Divergence=0.5                       ; floating point, the global fallback of
   host's default draw window, and a host key moves exactly that window, so
   shaping against it would be wrong.  The projectile then keeps the host
   scatter.  Remove the old keys when moving a projectile over.
-- `Physical` (B16) is not in this build yet; neither it nor the burst-point
-  scatter is read here - the round's next commits add them.
+- `Physical` (B16) is not in this build yet - the round's next commit adds it.
+  The burst-point scatter is in this build; unlike the three shaping paths it
+  needs both `Min` and `Max` (see "The burst point").
 ```
 
 ### The three engine paths
@@ -494,6 +496,37 @@ LW.Divergence=0.5                       ; floating point, the global fallback of
   horizontal muzzle -> aim direction; a shot straight up or down has no flight
   line in the 2-D plane and is left circular.
 
+### The burst point (ROT / Arm missiles, B14/6A)
+
+- The engine steers a projectile with `ROT > 0` or `Arm > 0` (the vanilla
+  guided-missile kinds) towards the centre of the live target on every frame, and
+  neither of its own scatter paths reaches such a projectile (the `Fire_At` block
+  needs `Inaccurate` + `Arcing`, the classic path `FlakScatter` + `Inviso`).
+  Even a launch offset would be steered away again.  The platform therefore
+  displaces the **burst point** instead.
+- Gate: `Inaccurate=yes`, `ROT > 0` or `Arm > 0`, no `Arcing`, no `Inviso`, and
+  **both** `LW.BallisticScatter.Min` and `.Max` written.  The explicit pair is
+  required because this path has no host draw window to fall back on; a section
+  that writes only one of the two keeps the engine's burst point (the platform
+  logs a warning when that section is read).
+- The offset reuses the same recipe: `Min` / `Max` at full range, `Sigma`
+  (default 0.5), the `Divergence` ramp of the distance actually flown, `Chance`,
+  and the area-preserving `Aspect` ellipse aligned with the chord from the burst
+  point back to the launch point.  The base is the engine's own burst point, so a
+  `Ranged` early detonation explodes where it happened (with the ramp of the
+  shorter distance) instead of jumping onto the target.
+- This is the **only** path of the module that draws random numbers: two draws on
+  the detonation frame from the scenario's synchronised RNG (radius fraction,
+  then angle fraction).  Both ends of a multiplayer match draw on the same frame
+  and compute the same point; the battle's random-number stream differs from
+  vanilla for the projectiles that use this path (a deliberate, documented
+  difference - the fork behaves the same way).
+- The projectile still flies to the target centre; only the warhead explodes
+  off-centre.  A `Cluster>1` projectile keeps the engine's own cluster scatter
+  layered on top of the displaced centre.  The offset does not apply to an
+  `Arcing` / `Inviso` projectile (both already scatter) or without `Inaccurate`
+  (the engine's snap code would overwrite the point again).
+
 ### Co-loads and the old key family
 
 - Supported hosts: Ares + official Phobos.  Ares hooks `0x6FE709` / `0x6FE7FE`
@@ -520,9 +553,13 @@ LW.Divergence=0.5                       ; floating point, the global fallback of
   `rules(md).ini` is parsed, and nothing is serialized - old and new savegames
   stay interchangeable, and switching the module on or off never changes a
   savegame.
-- Zero extra random draws: the platform never calls the RNG; `Chance` reuses the
-  host's draw and every other site only rewrites a value the host already
-  produced.  The random-number stream is therefore exactly the host's.
+- The three shaping paths draw no random number of their own: `Chance` reuses the
+  host's draw and every site only rewrites a value the host already produced, so
+  for those paths the random-number stream is exactly the host's.  The
+  burst-point path is the documented exception: it draws two numbers on the
+  detonation frame from the synchronised RNG (both ends of a match draw on the
+  same frame, so the point is identical; the stream differs from vanilla for the
+  projectiles that use that path).
 - A projectile that writes at least one `LW.` key is shaped and, with the
   platform defaults, deliberately **not** bit-identical to vanilla: the default
   `Sigma` is 0.5 (area-uniform) and the ramp defaults to the global `Divergence`
@@ -537,10 +574,12 @@ in the following points on purpose:
 - **`Sigma` default 0.5** (the fork's default is 1.0): the platform's default is
   area-uniform, the fork's is the engine-like radial-uniform (denser towards the
   centre).  Write `Sigma=1` to get the fork's default distribution back.
-- **No extra random draws**: the fork redraws the radius on the classic path and
-  draws a coin for its `Chance`; the platform reuses the host's draw for both,
-  so a co-loaded host's random-number stream (and the multiplayer
-  synchronisation it carries) is untouched.
+- **No extra random draws on the shaping paths**: the fork redraws the radius on
+  the classic path and draws a coin for its `Chance`; the platform reuses the
+  host's draw for both, so a co-loaded host's random-number stream (and the
+  multiplayer synchronisation it carries) is untouched.  The burst-point path is
+  the exception on both sides: it draws its two numbers explicitly (see "The
+  burst point" above), exactly like the fork's B14/6A.
 - **`Min` / `Max` mean the radius at full range on every path**: the fork keeps
   each engine path's own magnitude (its classic path doubles the values because
   the engine draws `U[0, 2 * global]` there); the platform normalizes every path
@@ -551,7 +590,7 @@ in the following points on purpose:
 
 ### Implementation notes (platform)
 
-- Seven hooks (`docs/HookCatalogue.md`): `0x46C41C/0xA` reads the projectile's
+- Eight hooks (`docs/HookCatalogue.md`): `0x46C41C/0xA` reads the projectile's
   keys in the `BulletTypeClass::LoadFromINI` success epilogue (ESI = the type,
   `CCINIClass*` at `[esp+0x90]`; the failure path is not hooked; shared with
   Ares / Kratos / official Phobos / Mix, all return 0); `0x6FE67D/6` captures a
@@ -561,7 +600,10 @@ in the following points on purpose:
   `0x6FE821/6` remaps the legacy-branch draw and adds its ramp (the post-Ares
   entry); `0x6FE8EE/6` applies the true ellipse at the scatter block's exit;
   `0x4687F8/6` shapes the classic radius (last in the official Phobos / Mix /
-  fork chain).
+  fork chain); `0x468DCF/6` rewrites the burst coordinate in
+  `BulletClass::Explode` just before the `Inaccurate` branch jumps over the
+  target snap (free in the audited co-load set - the fork uses `0x468FF4`,
+  which the official Phobos / Mix / fork occupy with non-zero returns).
 - `[General] LW.Divergence` is read through the platform's rules-INI
   notification (`0x6686C0`, `IniTakeover::RegisterRulesIniObserver`) when the
   engine has parsed `rules(md).ini` and before the projectile sections are read,
@@ -766,8 +808,8 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   `Sigma`、`Aspect`、`Divergence`）混写会让整份平台配置作废（并告警）：平台是拿
   宿主的默认抽样窗口做归一化的，而宿主键改的正是这个窗口，照它整形会算错；该
   抛射体保持宿主散布。迁移抛射体时请把旧键删掉。
-- `Physical`（B16）本构建还没有；爆发点散布也一样，两者都要等本轮后续提交，本
-  构建都不读。
+- `Physical`（B16）本构建还没有，要等本轮下一提交；爆点散布本构建已有，但与三条
+  整形路径不同，它要求 `Min` 与 `Max` 两个键都写（见"爆点散布"节）。
 ```
 
 ### 三条引擎路径
@@ -800,6 +842,27 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   飞行线取该发水平方向的炮口 -> 瞄准点方向；垂直上 / 下射击在 2-D 平面里没有
   飞行线，保持圆形。
 
+### 爆点散布（ROT / Arm 导弹，B14/6A）
+
+- 引擎每帧把 `ROT > 0` 或 `Arm > 0` 的抛射体（原版自寻的 / 引信计时导弹）转向
+  活体目标的中心，而且引擎自己的两条散布路径都进不去（`Fire_At` 块要求
+  `Inaccurate` + `Arcing`，经典路径要求 `FlakScatter` + `Inviso`）；即使发射时
+  抽出了偏移，制导也会把它带回目标中心。所以平台改为偏移**爆点**。
+- 门控：`Inaccurate=yes`、`ROT > 0` 或 `Arm > 0`、没有 `Arcing`、没有 `Inviso`，
+  并且 `LW.BallisticScatter.Min` 与 `.Max` **两个都写**。必须显式给一对边界，是
+  因为这条路径没有宿主抽样窗口可以回退；只写一个键的段保持引擎爆点（平台在读取
+  该段时会告警）。
+- 偏移沿用同一套配方：满射程处的 `Min` / `Max`、`Sigma`（默认 0.5）、按**实际
+  飞行距离**取 `Divergence` 斜坡、`Chance`，以及沿"爆点 -> 发射点"连线对齐的
+  面积等分 `Aspect` 椭圆。基准点是引擎自己算出的爆点，所以 `Ranged` 提前引爆
+  就在当时的位置炸（按较短距离的斜坡），不会瞬移到目标身上。
+- 这是模块里**唯一**自己抽随机数的路径：引爆帧从场景的同步 RNG 抽两个数（先
+  半径分数、再角度分数）。联机双端在同一帧抽样，算出的点一致；用了这条路径的
+  弹种会让整局的随机数流与纯原版不同（刻意且有文档的差异，fork 同口径）。
+- 弹体仍然飞向目标中心，只有战斗部偏着炸。`Cluster>1` 的弹保留引擎自己的集束
+  散布，叠在已偏移的中心之上。`Arcing` / `Inviso` 的弹（两者本来就散布）与
+  没有 `Inaccurate` 的弹不施加这个偏移（否则引擎的吸附代码会把爆点改回去）。
+
 ### 共载与旧键族
 
 - 支持的宿主：Ares + 官方 Phobos。Ares 钩 `0x6FE709` / `0x6FE7FE` 并返回（跳）
@@ -820,8 +883,10 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
 
 - **0 存档状态**：配置是解析 `rules(md).ini` 时填充的功能私有表，不序列化任何
   东西——新旧存档可以互换，模块开关也不影响任何存档内容。
-- **0 额外随机抽样**：平台从不调用 RNG；`Chance` 复用宿主抽样，其它站点只改写
-  宿主已经产出的数值。因此随机数流与宿主完全一致。
+- **三条整形路径 0 额外随机抽样**：它们的站点都不调用 RNG；`Chance` 复用宿主
+  抽样，其它站点只改写宿主已经产出的数值，因此这几条路径上随机数流与宿主完全
+  一致。**爆点散布是文档化的例外**：它在引爆帧从同步 RNG 抽两个数（联机双端同帧
+  抽样，点一致；用了这条路径的弹种会改变整局随机数流）。
 - 写了至少一个 `LW.` 键的抛射体即被整形，在平台默认值下**按设计不**与纯原版
   逐位一致：默认 `Sigma` 是 0.5（面积均匀），距离斜坡默认取全局 `Divergence` 0.5。
   一个 `LW.` 键都不写的抛射体则与宿主行为完全一致。
@@ -833,9 +898,10 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
 
 - **`Sigma` 默认 0.5**（fork 默认 1.0）：平台默认是面积均匀，fork 默认是类似引擎
   的径向均匀（中心更密）。想要 fork 的默认分布，写 `Sigma=1`。
-- **不额外抽随机数**：fork 在经典路径上重抽半径，还会为 `Chance` 抽一次硬币；
-  平台这两处都复用宿主抽样，所以共载宿主的随机数流（以及它所承载的联机同步）
-  不受影响。
+- **三条整形路径不额外抽随机数**：fork 在经典路径上重抽半径，还会为 `Chance` 抽
+  一次硬币；平台这两处都复用宿主抽样，所以共载宿主的随机数流（以及它所承载的
+  联机同步）不受影响。**爆点散布在两边都是例外**：它自己抽两个数（见上文
+  "爆点散布"），与 fork 的 B14/6A 相同。
 - **`Min` / `Max` 在每条路径上都表示满射程处半径**：fork 保留各引擎路径自己的
   量级（它的经典路径因为引擎在那里抽 `U[0, 2 * global]` 而把数值翻倍）；平台把
   每条路径都归一到同一个满射程半径。
@@ -844,14 +910,17 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
 
 ### 实现说明（平台）
 
-- 七个 hook（`docs/HookCatalogue.md`）：`0x46C41C/0xA` 在
+- 八个 hook（`docs/HookCatalogue.md`）：`0x46C41C/0xA` 在
   `BulletTypeClass::LoadFromINI` 成功尾声读抛射体的键（ESI = 类型，
   `CCINIClass*` 在 `[esp+0x90]`；失败路径不钩；与 Ares / Kratos / 官方 Phobos /
   Mix 同址，全部返回 0）；`0x6FE67D/6` 捕获一发（抛射体类型、未散布的瞄准基点、
   3-D 距离、开火武器射程、引擎分支）；`0x6FE71C/6` 重映射可见分支抽样（Ares 之后
   的入口）；`0x6FE73F/6` 替换可见分支的距离缩放；`0x6FE821/6` 重映射旧分支抽样并
   补距离斜坡（Ares 之后的入口）；`0x6FE8EE/6` 在散布块出口施加真椭圆；
-  `0x4687F8/6` 整形经典路径半径（官方 Phobos / Mix / fork 链上的最后一个）。
+  `0x4687F8/6` 整形经典路径半径（官方 Phobos / Mix / fork 链上的最后一个）；
+  `0x468DCF/6` 在 `BulletClass::Explode` 里、`Inaccurate` 分支跳过目标吸附的
+  `jne` 之前改写爆点坐标（在已审计的共载集里是空站点——fork 用的 `0x468FF4`
+  被官方 Phobos / Mix / fork 的非 0 返回占住）。
 - `[General] LW.Divergence` 走平台的 rules-INI 通知（`0x6686C0`，
   `IniTakeover::RegisterRulesIniObserver`）：引擎解析完 `rules(md).ini`、抛射体段
   被读取之前就会通知到，所以逐抛射体的缺省值已经就位。其余键都在上面的 INI 站点

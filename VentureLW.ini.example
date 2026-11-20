@@ -169,8 +169,10 @@ SuddenDeath=yes
 ; Scatter core (id: scatter): the platform's own projectile scatter system - the
 ; `LW.BallisticScatter.*` keys in a projectile's own [Projectile] section of
 ; rules(md).ini reshape the scatter draw the host produced (radius remap,
-; area-uniform true ellipse, distance ramp; burst-point / physical offsets for
-; engine-guided missiles come later in the round).  The behaviour is opt-in per
+; area-uniform true ellipse, distance ramp) and displace the burst point of an
+; engine-guided ROT / Arm missile (that path needs both Min and Max written; it
+; draws its two random values on the detonation frame).  The physical flight
+; offset for missiles comes later in the round.  The behaviour is opt-in per
 ; projectile - a projectile without any `LW.` key keeps the host/vanilla
 ; behaviour - so this switch only enables the module.  The R10-1 probe key is
 ; gone.  See docs/New-or-Enhanced-Logics.md (English + 中英对照).

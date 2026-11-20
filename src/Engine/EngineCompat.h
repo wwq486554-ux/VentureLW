@@ -156,11 +156,13 @@ static_assert(offsetof(BuildingClass, Type) == 0x520,
 // Scatter core binding (P1/R10): the feature reads the bullet type's scatter
 // flags, the bullet's target/source coordinates and (on the classic MoveTo
 // path) its weapon type; the engine's Fire_At scatter block writes the
-// scattered offset into crdOffset relative to the captured aim base.  The
-// offsets are exactly the ones the engine's instruction listing uses
-// (TechnoClass::Fire_At 0x6FE67D..0x6FE8EE, BulletClass::MoveTo
-// 0x468670..0x4688A9) and were
-// measured with scripts/linux/abi_probe.sh against the pinned YRpp.
+// scattered offset into crdOffset relative to the captured aim base, and the
+// burst-point path (B14/6A) rewrites BulletClass::Explode's local burst
+// coordinate at [esp+0xC..0x14] at 0x468DCF.  The offsets are exactly the ones
+// the engine's instruction listing uses (TechnoClass::Fire_At
+// 0x6FE67D..0x6FE8EE, BulletClass::MoveTo 0x468670..0x4688A9,
+// BulletClass::Explode 0x468D80..0x4690AC) and were measured with
+// scripts/linux/abi_probe.sh against the pinned YRpp.
 static_assert(offsetof(BulletClass, Type) == 0xAC, "BulletClass::Type moved - re-check the YRpp pin");
 static_assert(offsetof(BulletClass, WeaponType) == 0x130, "BulletClass::WeaponType moved - re-check the YRpp pin");
 static_assert(offsetof(BulletClass, SourceCoords) == 0x134, "BulletClass::SourceCoords moved - re-check the YRpp pin");
@@ -169,6 +171,12 @@ static_assert(offsetof(BulletTypeClass, Arcing) == 0x29B, "BulletTypeClass::Arci
 static_assert(offsetof(BulletTypeClass, Inviso) == 0x29E, "BulletTypeClass::Inviso moved - re-check the YRpp pin");
 static_assert(offsetof(BulletTypeClass, Inaccurate) == 0x2A2, "BulletTypeClass::Inaccurate moved - re-check the YRpp pin");
 static_assert(offsetof(BulletTypeClass, FlakScatter) == 0x2A3, "BulletTypeClass::FlakScatter moved - re-check the YRpp pin");
+// The burst-point path (B14/6A) gates on the engine-guided kinds: the guidance
+// block of BulletClass::Update opens with `cmp [type+0x2DC], 0; jle` (0x4668CB)
+// and BulletClass::Unlimbo seeds the arm timer from [type+0x2F0] (0x468A5D, with
+// the aircraft exception just before it); both re-decoded for R10-3.
+static_assert(offsetof(BulletTypeClass, ROT) == 0x2DC, "BulletTypeClass::ROT moved - re-check the YRpp pin");
+static_assert(offsetof(BulletTypeClass, Arm) == 0x2F0, "BulletTypeClass::Arm moved - re-check the YRpp pin");
 static_assert(offsetof(RulesClass, BallisticScatter) == 0x1734, "RulesClass::BallisticScatter moved - re-check the YRpp pin");
 
 // Syringe register frame layout (Syringe.h, SYR_VER=2). A wrong sized frame
