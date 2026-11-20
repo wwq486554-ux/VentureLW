@@ -334,6 +334,25 @@ bool IsBridgeCell(const CellClass* const pCell)
 	return IsEngineBridgeTileIndex(tileIndex, base, middle1, middle2);
 }
 
+// Low bridge pieces: overlays on the water, no bridge cell flags, no bridge
+// tiles.  The engine tests the cell's overlay index against two hardcoded
+// ranges (see BridgeTiles.h); mirroring that test is what makes the sweep ask
+// the engine to destroy exactly the cells the engine itself would.
+bool IsLowBridgeCell(const CellClass* const pCell)
+{
+	if (!pCell)
+		return false;
+
+	return IsEngineLowBridgeOverlayIndex(pCell->OverlayTypeIndex);
+}
+
+// Both bridge families, for the diagnostic counters only: the two are destroyed
+// through different branches of MapClass::DamageArea but share the sweep.
+bool IsBridgeLikeCell(const CellClass* const pCell)
+{
+	return IsBridgeCell(pCell) || IsLowBridgeCell(pCell);
+}
+
 bool IsBridgeAlreadyBlown(const CellClass* const pCell)
 {
 	return std::find(g_blownBridges.begin(), g_blownBridges.end(), pCell) != g_blownBridges.end();
@@ -407,17 +426,28 @@ void SweepCell(CellClass* const pCell)
 	// Wall=yes warhead reaches, and that branch rolls against BridgeStrength
 	// first.  There is exactly one way past the roll: the warhead being the
 	// engine's [CombatDamage] IonCannonWarhead.  Ask the engine to do it with
-	// that warhead at damage 1, then run the aftermath (units on the deck,
-	// craters) through BlowUpBridge as well.
-	if (IsBridgeCell(pCell) && !IsBridgeAlreadyBlown(pCell))
+	// that warhead at damage 1, then run the high-bridge aftermath (units on the
+	// deck, craters) through BlowUpBridge as well.
+	//
+	// Two kinds of cell reach that section: high-bridge cells (bridge flags, or
+	// the [General] BridgeMiddle tile groups) and low-bridge cells (one of the
+	// engine's two hardcoded overlay index ranges).  They share the gates but
+	// not the rest: the high-bridge branch needs the Z of the deck point and the
+	// engine only removes the other cells of the run, while the low-bridge branch
+	// takes the cell's ground coords and removes the whole run itself.
+	const bool isHighBridge = IsBridgeCell(pCell);
+	const bool isLowBridge = !isHighBridge && IsLowBridgeCell(pCell);
+
+	if ((isHighBridge || isLowBridge) && !IsBridgeAlreadyBlown(pCell))
 	{
 		// The bridge branch only considers a point inside
 		// (Level - 2) * LevelHeight + base < Z <= (Level + 1) * LevelHeight + base.
 		// GetCellCoords() returns the ground-relative height (0 on flat ground),
 		// so the bridge height has to be added for the point to land on the deck.
-		// Only the BridgeHead flag gates that Z test; a BridgeBody cell skips it.
+		// Only the BridgeHead flag gates that Z test; a BridgeBody cell skips it,
+		// and the low-bridge branch never looks at Z at all.
 		CoordStruct coords = pCell->GetCellCoords();
-		const bool isBridgeHead = pCell->ContainsBridge();
+		const bool isBridgeHead = isHighBridge && pCell->ContainsBridge();
 
 		if (isBridgeHead)
 			coords.Z += CellClass::BridgeHeight;
@@ -425,11 +455,12 @@ void SweepCell(CellClass* const pCell)
 		if (g_bridgeLogs < kBridgeLogLimit)
 		{
 			++g_bridgeLogs;
-			Log::Debug("[SuddenDeath] bridge candidate [%d,%d] flags=0x%08X tile=%d level=%d "
-				"head=%d z=%d",
+			Log::Debug("[SuddenDeath] bridge candidate [%d,%d] flags=0x%08X tile=%d "
+				"overlay=%d level=%d kind=%s head=%d z=%d",
 				static_cast<int>(pCell->MapCoords.X), static_cast<int>(pCell->MapCoords.Y),
 				static_cast<unsigned>(pCell->Flags), pCell->IsoTileTypeIndex,
-				static_cast<int>(pCell->Level), isBridgeHead ? 1 : 0, coords.Z);
+				pCell->OverlayTypeIndex, static_cast<int>(pCell->Level),
+				isHighBridge ? "high" : "low", isBridgeHead ? 1 : 0, coords.Z);
 		}
 
 		WarheadTypeClass* const pIonWarhead =
@@ -450,15 +481,20 @@ void SweepCell(CellClass* const pCell)
 				"cannot be collapsed");
 		}
 
-		pCell->BlowUpBridge();
+		// BlowUpBridge is the high-bridge aftermath only (units on the deck plus
+		// the crater/effects); the engine's low-bridge branch removes the overlay
+		// run itself and never calls it, so neither does the sweep.
+		if (isHighBridge)
+			pCell->BlowUpBridge();
+
 		g_blownBridges.push_back(pCell);
 
 		if (g_bridgeLogs < kBridgeLogLimit)
 		{
 			++g_bridgeLogs;
-			Log::Debug("[SuddenDeath] collapse bridge cell [%d,%d] result=%d",
+			Log::Debug("[SuddenDeath] collapse bridge cell [%d,%d] kind=%s result=%d",
 				static_cast<int>(pCell->MapCoords.X), static_cast<int>(pCell->MapCoords.Y),
-				static_cast<int>(result));
+				isHighBridge ? "high" : "low", static_cast<int>(result));
 		}
 	}
 
@@ -642,20 +678,21 @@ void RegisterDetonation(const CoordStruct& coords, const double cellSpread)
 		// Count bridge cells twice: inside the radius the sweep will cover and in
 		// a wider ring.  The pair tells a "the bridge was outside the area" case
 		// apart from a "the map's bridge cells are not flagged" case - neither is
-		// distinguishable from a plain "no bridge candidate" log line.
+		// distinguishable from a plain "no bridge candidate" log line.  Low
+		// bridges are counted as well, so "in sweep" also covers the overlay kind.
 		int bridgesInSweep = 0;
 		int bridgesNear = 0;
 
 		CellRangeIterator<CellClass>{}(cell, cellSpread + 0.5, [&bridgesInSweep](CellClass* const pCell)
 		{
-			if (IsBridgeCell(pCell))
+			if (IsBridgeLikeCell(pCell))
 				++bridgesInSweep;
 			return true;
 		});
 
 		CellRangeIterator<CellClass>{}(cell, cellSpread + 2.5, [&bridgesNear](CellClass* const pCell)
 		{
-			if (IsBridgeCell(pCell))
+			if (IsBridgeLikeCell(pCell))
 				++bridgesNear;
 			return true;
 		});

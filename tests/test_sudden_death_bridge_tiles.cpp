@@ -1,9 +1,10 @@
-// Unit test: the bridge tile-type comparison of the engine's MapClass::DamageArea.
+// Unit test: the two bridge-cell tests of the engine's MapClass::DamageArea -
+// the high-bridge tile-type comparison and the low-bridge overlay index ranges.
 //
 // TEST_DEPS:
-// (header-only test: the comparison lives in
-// src/Features/SuddenDeath/BridgeTiles.h and is engine-free on purpose; the
-// engine globals it is fed with and the sweep itself are covered by
+// (header-only test: the tests live in
+// src/Features/SuddenDeath/BridgeTiles.h and are engine-free on purpose; the
+// engine globals they are fed with and the sweep itself are covered by
 // verify_build.py / load_probe.sh / the in-game check.)
 
 #include <cstdio>
@@ -30,6 +31,11 @@ void Check(const bool ok, const char* const what)
 bool Match(const int tile, const int base, const int middle1, const int middle2)
 {
 	return venture::features::sudden_death::IsEngineBridgeTileIndex(tile, base, middle1, middle2);
+}
+
+bool LowBridge(const int overlay)
+{
+	return venture::features::sudden_death::IsEngineLowBridgeOverlayIndex(overlay);
 }
 } // namespace
 
@@ -59,6 +65,21 @@ int __cdecl main()
 
 	Check(Match(203, 200, 1, 9), "the arithmetic is relative to the loaded base");
 	Check(!Match(204, 200, 10, 1), "a group past the adjusted slot does not match");
+
+	// The engine's low-bridge overlay ranges (MapClass::DamageArea 0x48A214 and
+	// 0x48A26A): 74..99 and 205..230 inclusive, everything around them outside.
+	Check(LowBridge(74), "the first slot of the asphalt low-bridge range matches");
+	Check(LowBridge(99), "the last slot of the asphalt low-bridge range matches");
+	Check(LowBridge(205), "the first slot of the concrete low-bridge range matches");
+	Check(LowBridge(230), "the last slot of the concrete low-bridge range matches");
+	Check(LowBridge(77), "the shipped-YR LOBRDG01 slot matches");
+
+	Check(!LowBridge(73), "a slot before the asphalt range does not match");
+	Check(!LowBridge(100), "a slot past the asphalt range does not match");
+	Check(!LowBridge(204), "a slot before the concrete range does not match");
+	Check(!LowBridge(231), "a slot past the concrete range does not match");
+	Check(!LowBridge(0), "the empty overlay slot does not match");
+	Check(!LowBridge(-1), "a null overlay index does not match");
 
 	if (g_failures == 0)
 	{

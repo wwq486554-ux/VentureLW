@@ -227,7 +227,8 @@ ROFCurve.Cycle=no            ; 布尔
   the kill in the same frame would notice it.
 - The same detonation sweeps the terrain inside `CellSpread + 0.5` cells: ore is
   cleared completely, bridges collapse through the engine's own IonCannon branch
-  (so one hit always breaks the span, no `BridgeStrength` roll), and terrain
+  (so one hit always breaks the span, no `BridgeStrength` roll; both the
+  high-bridge deck and the low-bridge overlay kind are covered), and terrain
   objects (trees, tiberium pillars) are removed without a health check - which is
   what makes the `Immune=yes` tiberium pillars of this mod removable.
 - A unit that carries a SuddenDeath weapon gets the Attack cursor on an
@@ -332,7 +333,9 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
 - The bridge sweep passes the engine's `IonCannonWarhead` to a one-point
   `MapClass::DamageArea` at the bridge deck height, then runs `BlowUpBridge` for
   the aftermath; a detonation produced by that nested call is ignored, so the
-  sweep cannot feed itself.
+  sweep cannot feed itself.  A low bridge is a different cell kind: the call uses
+  the cell's ground coords and there is no `BlowUpBridge`, because the engine's
+  low-bridge branch removes the whole overlay run itself.
 - Bridge **cell detection** is the one place where the pbsnew8 port was not
   enough: pbsnew8 triggers on `ContainsBridge() || ContainsBridgeEx()` (the
   bridge cell flags), and some original-YR maps leave those flags unset even
@@ -342,6 +345,18 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   bridge tileset base is compared with the `[General]` `BridgeMiddle1` /
   `BridgeMiddle2` tile groups (`BridgeTiles.h`).  Everything downstream is
   unchanged pbsnew8 behaviour.
+- **Low bridges** (the `LOBRDG` / `LOBRDB` overlay families) are a second kind of
+  bridge cell: an overlay on the water, with none of the bridge cell flags and
+  none of the bridge tile types, so the two tests above never see them.  The
+  engine destroys them from the same `MapClass::DamageArea` section, in a branch
+  that compares the cell's `OverlayTypeIndex` with two hardcoded ranges
+  (`0x48A217`: `74..99`, `0x48A26D`: `205..230`) and then hands the cell to its
+  own run destroyer.  The sweep mirrors exactly those two ranges
+  (`IsEngineLowBridgeOverlayIndex` in `BridgeTiles.h`) and uses the same
+  `IonCannonWarhead` call.  The ranges are raw `[OverlayTypes]` indices, not
+  names: on the shipped YR list `LOBRDG01` sits at 77 and is covered, while the
+  family tail past slot 99 is outside the engine's own trigger for conventional
+  weapons too, so the feature does not invent a path around it.
 - No per-object extension, no savegame trailer row, no new platform INI key.
   The warhead table is a feature-local `unordered_map` filled when the rules are
   parsed (same pattern as the ROF curve).
@@ -355,9 +370,9 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   引爆过程里销毁对象会重入引擎正在遍历的对象簿记（fork 曾因此把建筑动画二次
   销毁）。实战中看不出来；只有"在同一帧里检测死亡"的触发器会注意到这一帧之差。
 - 同一次爆炸还会清扫 `CellSpread + 0.5` 范围内的地形：矿石**一次清光**，桥走
-  引擎自己的离子炮分支（**一次必断**，不经过 `BridgeStrength` 概率），地形对象
-  （树、矿柱）**不做血量判定直接移除**——这正是 `Immune=yes` 的矿柱也能被打掉的
-  原因。
+  引擎自己的离子炮分支（**一次必断**，不经过 `BridgeStrength` 概率；高架桥面与
+  低桥覆盖物都算），地形对象（树、矿柱）**不做血量判定直接移除**——这正是
+  `Immune=yes` 的矿柱也能被打掉的原因。
 - 手里拿着即死弹头武器的单位，对 `Immune=yes` 目标**能出攻击光标**，对 `Verses`
   为 0% 的目标**能开火**：该武器的"打不动"判定与光标降级被绕过。这是玩家手动
   开火路径；AI 的选目标逻辑不受影响。
@@ -436,7 +451,8 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
   `ReceiveDamage`，这正是"没有任何死亡效果"的原因；顺序有讲究，写在源码注释里。
 - 炸桥时以桥面高度向引擎的 `IonCannonWarhead` 请求一次 1 点伤害的
   `MapClass::DamageArea`，再调 `BlowUpBridge` 做善后；这次嵌套调用产生的爆炸会被
-  忽略，因此清扫不会自我喂养。
+  忽略，因此清扫不会自我喂养。**低桥**是另一种桥格：坐标用格子地面高度，而且不调
+  `BlowUpBridge`——引擎自己的低桥分支会把整段覆盖物一次清掉。
 - **桥格识别**是 pbsnew8 移植唯一需要补逻辑的地方：pbsnew8 用
   `ContainsBridge() || ContainsBridgeEx()`（桥格标志），而部分原版 YR 地图的桥格
   不带这些标志，引擎却仍能用常规炮弹拆桥。平台保留该判据，并补上引擎
@@ -444,5 +460,14 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
   桥瓦片基准后，与 `[General]` 的 `BridgeMiddle1` / `BridgeMiddle2` 瓦片组比较
   （`BridgeTiles.h`）。其后的 Z+416、IonCannon `DamageArea`、`BlowUpBridge` 全部
   沿用 pbsnew8。
+- **低桥**（`LOBRDG` / `LOBRDB` 两族覆盖物）是第二种桥格：它铺在水面上的覆盖物，
+  既没有桥格标志也没有桥瓦片，上面两条判据都看不到它。引擎在
+  `MapClass::DamageArea` 的同一段里用另一条分支拆它：把格子的 `OverlayTypeIndex`
+  与两段硬编码区间比较（`0x48A217`：`74..99`；`0x48A26D`：`205..230`），命中后
+  交给引擎自己的整段拆除函数。平台原样镜像这两段区间
+  （`BridgeTiles.h` 的 `IsEngineLowBridgeOverlayIndex`），走同一次
+  `IonCannonWarhead` 调用。区间是 **`[OverlayTypes]` 的原始编号**，不是名字：原版
+  YR 的 `LOBRDG01` 在 77、落在区间内；编号超过 99 的族尾，连同常规武器一样都在
+  引擎自己的触发范围之外，本功能不为它另造路径。
 - 没有 per-object 扩展、没有存档尾块、没有新增平台 INI 键。弹头表是 feature 私有
   的 `unordered_map`，在解析 rules 时填充（与 ROF 曲线同一模式）。

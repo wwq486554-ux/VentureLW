@@ -33,6 +33,30 @@
 // and the three engine globals; the rest of the pbsnew8 recipe (the Z + 416
 // adjustment, the IonCannonWarhead DamageArea call, BlowUpBridge and the
 // BlownBridges de-duplication) is untouched.
+//
+// Low bridges are a second, different kind of bridge cell: they are overlays
+// laid on the water, carry none of the bridge cell flags and never show up in
+// the tile comparison above.  The engine destroys them from one more branch of
+// the same MapClass::DamageArea section, and that branch tests the cell's
+// OverlayTypeIndex against two hardcoded ranges:
+//
+//   0x48A217  mov eax,[edi+0x44]        ; CellClass::OverlayTypeIndex
+//   0x48A21C  cmp eax,0x4A / 0x4A..0x63 ; 74..99   (asphalt low bridge run)
+//   0x48A26D  mov eax,[edi+0x44]
+//   0x48A274  cmp eax,0xCD / 0xCD..0xE6 ; 205..230 (concrete low bridge run)
+//
+// A hit inside either range then has to be the [General] IonCannonWarhead or win
+// a RandomRanged(1, BridgeStrength) roll, and is handed to the engine's own
+// run destroyer (0x57BAA0 / 0x57CCF0) together with the cell's map coords; that
+// walks the whole bridge run and removes it cell by cell.  The two branches
+// share the DestroyableBridges and warhead `Wall=yes` gates described above.
+//
+// The ranges are raw [OverlayTypes] indices, not overlay names: they are exactly
+// what the engine compares, so this header mirrors them instead of looking for a
+// "LOBRDG" name.  A rules file that orders [OverlayTypes] differently moves which
+// of its overlays count as low-bridge triggers for ordinary weapons and for this
+// feature alike (the shipped YR list puts LOBRDG01 at 77, inside the range; the
+// family tail past slot 99 stays outside it for the engine too).
 // ---------------------------------------------------------------------------
 
 namespace venture::features::sudden_death
@@ -54,5 +78,15 @@ inline bool IsEngineBridgeTileIndex(
 
 	return (adjusted >= middle1 && adjusted <= middle1 + 3)
 		|| (adjusted >= middle2 && adjusted <= middle2 + 3);
+}
+
+// The engine's low-bridge overlay index test (0x48A214..0x48A27F): the two
+// hardcoded 26-slot ranges of MapClass::DamageArea.  Everything outside them is
+// not a low-bridge trigger for the engine either, so the sweep does not ask the
+// engine to destroy it.
+inline bool IsEngineLowBridgeOverlayIndex(const int overlayIndex)
+{
+	return (overlayIndex >= 74 && overlayIndex <= 99)
+		|| (overlayIndex >= 205 && overlayIndex <= 230);
 }
 } // namespace venture::features::sudden_death

@@ -11,6 +11,20 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ### Fixed
 
+- **SuddenDeath: low bridges (the overlay bridge families).**  The tile-type test
+  below only covers the high-bridge (iso-tile) system: a low bridge is an overlay
+  on the water and carries neither the bridge cell flags nor the `BridgeMiddle`
+  tile types, so the sweep never asked the engine to destroy it.  The engine's
+  low-bridge branch is the other half of `MapClass::DamageArea`'s bridge section
+  (`0x48A217`: `OverlayTypeIndex` `74..99`, `0x48A26D`: `205..230`), and the
+  sweep now mirrors those two ranges (`IsEngineLowBridgeOverlayIndex` in
+  `Features/SuddenDeath/BridgeTiles.h`) and sends the cell through the same
+  `IonCannonWarhead` call.  The engine removes the whole overlay run itself, so
+  this path does not run `BlowUpBridge` (the high-bridge aftermath).  The ranges
+  are raw `[OverlayTypes]` indices - exactly what the engine tests - so the
+  family tail past slot 99 stays outside the trigger for this feature just as it
+  does for conventional weapons.  `tests/test_sudden_death_bridge_tiles.cpp` pins
+  the ranges.
 - **SuddenDeath: bridges on maps whose cells do not carry the bridge flags.**
   pbsnew8's trigger (`ContainsBridge() || ContainsBridgeEx()`) is kept, and the
   sweep now also mirrors the engine's own tile-type test from
@@ -44,8 +58,8 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   now shows each recorded detonation (`detonation cell [...]`, including how
   many bridge cells lie inside and just outside the sweep radius and the
   scenario's `DestroyableBridges` flag), each bridge
-  candidate with its cell flags / level / Z, and the `MapClass::DamageArea`
-  result of the collapse attempt.
+  candidate with its cell flags / overlay / level / kind (high or low) / Z, and
+  the `MapClass::DamageArea` result of the collapse attempt.
 
 ### Added
 

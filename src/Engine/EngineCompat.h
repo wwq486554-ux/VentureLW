@@ -129,6 +129,11 @@ static_assert(offsetof(CellClass, MapCoords) == 0x24, "CellClass::MapCoords move
 // themselves are runtime data and cannot be asserted; see BridgeTiles.h.
 static_assert(offsetof(CellClass, IsoTileTypeIndex) == 0x38,
 	"CellClass::IsoTileTypeIndex moved - re-check the YRpp pin");
+// The low-bridge half of the same engine branch (0x48A214 / 0x48A26A) tests the
+// cell's OverlayTypeIndex against two hardcoded [OverlayTypes] index ranges; see
+// BridgeTiles.h.
+static_assert(offsetof(CellClass, OverlayTypeIndex) == 0x44,
+	"CellClass::OverlayTypeIndex moved - re-check the YRpp pin");
 static_assert(CellClass::BridgeHeight == 416,
 	"CellClass::BridgeHeight changed - re-check the YRpp pin");
 static_assert(sizeof(TerrainClass) == 0xE0, "TerrainClass ABI changed - re-check the YRpp pin");
