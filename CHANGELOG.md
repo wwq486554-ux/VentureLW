@@ -11,24 +11,32 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
 
 ### Added
 
-- **Scatter core: burst-point scatter for engine-guided missiles.**  A projectile
-  with `ROT > 0` or `Arm > 0` is steered by the engine to the centre of the live
+- **Scatter core: physical flight offset for engine-guided missiles.**  A
+  projectile with `ROT > 0` is steered by the engine to the centre of the live
   target on every frame, so neither engine scatter path can displace where it
   goes off.  A projectile that is also `Inaccurate=yes` and writes both
-  `LW.BallisticScatter.Min` and `.Max` now gets its final burst point displaced
-  with the same recipe (`Min` / `Max` at full range, `Sigma`, the `Divergence`
-  ramp of the distance actually flown, `Chance`, the area-preserving `Aspect`
-  ellipse along the flight line).  The base is the engine's own burst point, so a
-  `Ranged` early detonation stays where it happened and a `Cluster` projectile
-  keeps the engine's cluster scatter on top of the displaced centre.  This is the
-  only path of the module that draws random numbers: two draws on the detonation
-  frame from the synchronised scenario RNG, so both ends of a multiplayer match
-  compute the same point (the battle's random-number stream differs from vanilla
-  for the projectiles that use it).  The engine's own convergence point
-  `0x468FF4` is occupied by the official Phobos / Mix / fork handlers, so the
-  platform hooks the `Inaccurate` branch's `jne` at `0x468DCF/6` instead.  The
-  projectile still flies to the target centre - only the warhead explodes
-  off-centre.  See `docs/New-or-Enhanced-Logics.md` ("The burst point") and
+  `LW.BallisticScatter.Min` and `.Max` is now **physically displaced**: the
+  offset is drawn once at launch (from the synchronised RNG), the guidance aim
+  point is moved by it on every frame, and the missile is set off at that point
+  (a segment test, so a fast missile cannot jump over it).  The missile really
+  flies to the scattered point, with the same recipe as the shaping paths
+  (`Min` / `Max` at full range, `Sigma`, the `Divergence` ramp of the launch
+  distance, `Chance` and the area-preserving `Aspect` ellipse along the launch
+  line).  This is automatic: there is **no separate `Physical` key** - the
+  fork's opt-in split is deliberately not ported (user decision 2026-11-20).
+  The aim point is clamped into the map, because the engine silently removes a
+  bullet whose position is illegal; a lost target does not cancel the shot (the
+  missile keeps flying to the last aim point).  An `Arm > 0` projectile without
+  `ROT` (a fuse-only projectile with no guidance to move) gets the burst-point
+  offset instead, drawn on the detonation frame.  The physical state is
+  transient per-bullet state and is not part of the savegame.  Two sites are
+  shared with handlers that return non-zero only for projectiles the platform
+  does not scatter (Inviso bullets / projectiles with their own trajectory), so
+  the platform still runs last in the chain; the engine's own convergence point
+  `0x468FF4` is occupied by the official Phobos / Mix / fork handlers and is not
+  used.  The battle's random-number stream differs from vanilla for the
+  projectiles that use these paths (documented, not a desync).  See
+  `docs/New-or-Enhanced-Logics.md` ("Guided missiles") and
   `docs/HookCatalogue.md`.
 
 ### Fixed

@@ -28,13 +28,19 @@
 //                                    behaviour until the round decides on the
 //                                    segmented interval (a warning says so)
 //
-// `LW.BallisticScatter.Physical` (B16) is the round's next commit and is not
-// read here.  The burst-point scatter (B14/6A) is in this commit: the same keys
-// above, applied to the burst point of an engine-guided ROT / Arm missile (the
-// hook lives in Hooks.Scatter.cpp; the geometry, ShapeBurstOffset, in
-// ScatterMath.h).  Unlike the three shaping paths it requires *both* Min and Max
-// to be written - it has no host draw window to fall back on - and a partial pair
-// is reported with a warning when the section is read.
+// Engine-guided projectiles (the keys above, but no host scatter window):
+//
+//   * `ROT > 0` is the physical flight offset: the offset is drawn once at
+//     launch, the guidance aim point is moved by it on every frame and the
+//     missile is set off at that point, so it really flies to the scattered
+//     point.  This is automatic - there is no separate opt-in key (user decision
+//     2026-11-20: the old fork's `...Physical=yes` split is gone);
+//   * `Arm > 0` without `ROT` is a fuse-only projectile with no guidance to
+//     move, so only its burst point is displaced.
+//
+// Both entries require *both* Min and Max to be written (no host draw window to
+// fall back on) and are reported with a warning when a section writes only one
+// of the two.
 //
 // Enabling is data-driven, with no separate switch and no conflict detection:
 // a projectile section that contains any one of the keys above is shaped; a
@@ -47,6 +53,7 @@
 #include "Core/EngineIni.h"
 #include "Core/IniTakeover.h"
 #include "Core/Log.h"
+#include "Core/ScenarioClear.h"
 #include "Engine/EngineCompat.h"
 
 #include "Features/Scatter/Scatter.h"
@@ -70,6 +77,14 @@ double g_globalDivergence = kGlobalDivergenceDefault;
 // Bullet type objects are process-lifetime, so the pointer keys are stable; a
 // re-parse (if the engine ever does one) simply overwrites the entry.
 std::unordered_map<const BulletTypeClass*, ScatterConfig> g_configs;
+
+// Per-bullet physical-scatter state (B16).  Transient and non-savegame: filled
+// once at launch (0x4688A9) and only read afterwards, dropped by the bullet
+// destructor (0x4665E9) and by a scenario clear.  A one-entry cache serves the
+// two fetches of the same bullet within one update (aim then detonation).
+std::unordered_map<const BulletClass*, PhysicalScatterState> g_physical;
+const BulletClass* g_physicalCacheKey = nullptr;
+PhysicalScatterState* g_physicalCacheValue = nullptr;
 
 // Diagnostic caps: a misconfigured mod must not flood the log.
 constexpr int kWarningLimit = 8;
@@ -261,9 +276,18 @@ void OnRulesIniReady(IniTakeover::IReader& rulesIni)
 	}
 }
 
+void __cdecl ClearPhysicalOnScenarioClear()
+{
+	ClearPhysicalScatter();
+}
+
 void __cdecl Initialize(const FeatureContext& context)
 {
 	(void)context;
+
+	// Registered whether the module is on or off - Initialize() runs in both
+	// states and the per-bullet state must never survive a scenario change.
+	RegisterScenarioClearObserver(&ClearPhysicalOnScenarioClear);
 
 	if (!g_enabled)
 	{
@@ -320,6 +344,51 @@ const ScatterConfig* FindConfig(const BulletTypeClass* const pType)
 double GlobalDivergence()
 {
 	return g_globalDivergence;
+}
+
+PhysicalScatterState* FetchPhysicalScatter(const BulletClass* const pBullet)
+{
+	if (!g_enabled || !pBullet)
+		return nullptr;
+
+	if (pBullet == g_physicalCacheKey)
+		return g_physicalCacheValue;
+
+	const auto it = g_physical.find(pBullet);
+	g_physicalCacheKey = pBullet;
+	g_physicalCacheValue = it == g_physical.end() ? nullptr : &it->second;
+	return g_physicalCacheValue;
+}
+
+bool BeginPhysicalScatter(const BulletClass* const pBullet, const PhysicalScatterState& state)
+{
+	if (!g_enabled || !pBullet || g_physical.find(pBullet) != g_physical.end())
+		return false;
+
+	g_physical.emplace(pBullet, state);
+
+	// A miss may have been cached for this very bullet by the launch site's
+	// idempotency check; the next fetch has to see the new entry.
+	g_physicalCacheKey = nullptr;
+	g_physicalCacheValue = nullptr;
+	return true;
+}
+
+void EndPhysicalScatter(const BulletClass* const pBullet)
+{
+	if (!pBullet)
+		return;
+
+	g_physical.erase(pBullet);
+	g_physicalCacheKey = nullptr;
+	g_physicalCacheValue = nullptr;
+}
+
+void ClearPhysicalScatter()
+{
+	g_physical.clear();
+	g_physicalCacheKey = nullptr;
+	g_physicalCacheValue = nullptr;
 }
 
 void LoadScatterConfigFromIni(BulletTypeClass* const pType, CCINIClass* const pINI)
@@ -418,18 +487,20 @@ void LoadScatterConfigFromIni(BulletTypeClass* const pType, CCINIClass* const pI
 		return;
 	}
 
-	// The burst-point path (B14/6A) has no host draw window, so it needs both
-	// bounds written.  Report a ROT / Arm projectile that only writes one of them
-	// once - otherwise the pair looks active while the burst point stays at the
-	// engine's value.
-	const bool burstCandidate = pType->Inaccurate && !pType->Arcing && !pType->Inviso
+	// The guided-projectile entries (physical flight offset for a ROT missile,
+	// burst point for a fuse-only Arm projectile) have no host draw window, so
+	// they need both bounds written.  Report a projectile that only writes one of
+	// them once - otherwise the pair looks active while the projectile keeps the
+	// engine's own point.
+	const bool guidedCandidate = pType->Inaccurate && !pType->Arcing && !pType->Inviso
 		&& (pType->ROT > 0 || pType->Arm > 0);
 
-	if (burstCandidate && (!config.MinSet || !config.MaxSet) && g_burstWarns < kWarningLimit)
+	if (guidedCandidate && (!config.MinSet || !config.MaxSet) && g_burstWarns < kWarningLimit)
 	{
 		++g_burstWarns;
-		Log::Warn("[Scatter] %s: writes only one of %s / %s; the burst-point scatter of a ROT/Arm "
-				  "missile needs both, so its burst point keeps the engine value",
+		Log::Warn("[Scatter] %s: writes only one of %s / %s; the guided-projectile scatter (physical "
+				  "flight offset for a ROT missile, burst point for an Arm-only fuse) needs both, so "
+				  "the projectile keeps the engine point",
 			section, kKeyMin, kKeyMax);
 	}
 

@@ -418,6 +418,25 @@ int __cdecl main()
 			"a drawTurn above 1 is clamped to a full turn");
 	}
 
+	// -- map clamp of the physical aim point --------------------------------
+	{
+		const ScatterAimBounds bounds{384, 1408, 384, 1152};
+
+		int x = 1000;
+		int y = 1000;
+		Check(!ClampScatterAim(x, y, bounds), "an aim point inside the map is untouched");
+
+		x = 0;
+		y = 5000;
+		Check(ClampScatterAim(x, y, bounds) && x == 384 && y == 1152,
+			"an aim point outside the map is clamped onto the border cell centre");
+
+		const ScatterAimBounds inverted{2000, 1000, 900, 300};
+		x = 1500;
+		y = 600;
+		Check(!ClampScatterAim(x, y, inverted), "inverted bounds are normalized, not trusted");
+	}
+
 	// -- tuning value normalization -----------------------------------------
 	{
 		Check(Near(NormalizeScatterAspect(0.0), kAspectMin), "an Aspect below 0.125 is clamped");

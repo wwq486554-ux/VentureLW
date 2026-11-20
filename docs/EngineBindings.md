@@ -684,8 +684,26 @@ depends on, all re-checked against `gamemd.exe` this round:
   `0x468A3F`) and by the official Phobos / Mix obstacle handler (`0x4688A9`
   returns `0x4688BD` for Inviso bullets), so a chained handler there would never
   run and the 2-D ellipse cannot be applied on this path.
-* The burst-point path (B14/6A) runs in `BulletClass::Explode` (`0x468D80`-
-  `0x4690AC`; the function has **no frame pointer**, every slot is ESP-relative).
+* The physical flight offset (B16) moves the projectile itself, because the
+  engine steers a `ROT > 0` missile to the centre of the live target every
+  frame.  Four sites: `0x4688A9/6` (the `MoveTo` merge point; `TargetCoords`
+  was written at `0x468722`, `SourceCoords` earlier, EBX = BulletClass) draws
+  the offset once and registers the per-bullet state; `0x466BAF/6` (inside the
+  guidance block, EBP = BulletClass, aim point at `[esp+0x30..0x38]`, the
+  overridden instruction is `mov ecx,ds:0x8871E0` = `RulesClass::Instance`)
+  moves the aim point by the offset every frame and sets `Data.Location` /
+  `Data.Distance` so the proximity fuse follows it; `0x4677D3/5` (`mov
+  eax,[esp+0x24]`, EBP = BulletClass, that stack slot holds the position this
+  frame moved to) sets the missile off on the frame whose flight segment passes
+  closest to the aim point and returns the engine's `Detonate` at `0x467E53`;
+  and `0x4665E9/0xA` (the single 10-byte `mov dword [esi+0xAC],0`, ESI =
+  BulletClass) drops the state.  The aim point is clamped into
+  `MapClass::MapCoordBounds` (`0x124`) at launch, because an illegal bullet
+  position is removed silently at `0x467A2B`.
+* The burst-point path (B14/6A) is the fallback for an `Arm > 0` projectile
+  without `ROT` (no guidance to move) and runs in `BulletClass::Explode`
+  (`0x468D80`-`0x4690AC`; the function has **no frame pointer**, every slot is
+  ESP-relative).
   `0x468DC1`-`0x468DCF` is `if (Type->Inaccurate) jne 0x468FF4`: the jump skips
   every target snap and lands on the single convergence point where the local
   coordinate is handed to the Airburst / Cluster / `Detonate` paths.  The
@@ -705,7 +723,10 @@ depends on, all re-checked against `gamemd.exe` this round:
   `Inaccurate = 0x2A2`, `FlakScatter = 0x2A3`, `ROT = 0x2DC`, `Arm = 0x2F0`
   (the engine gates its guidance on `[type+0x2DC] > 0` at `0x4668CB` and seeds
   the arm timer from `[type+0x2F0]` at `0x468A5D`);
-  `RulesClass::BallisticScatter = 0x1734`.  `BulletClass::WeaponType` was
+  `RulesClass::BallisticScatter = 0x1734`; `BulletClass::Data = 0xB8`
+  (`BulletData::ArmTimer = 0xC`, `Location = 0x18`, `Distance = 0x24`),
+  `BulletClass::Velocity = 0xE8`, `Target = 0x10C`, `MapClass::MapCoordBounds =
+  0x124`.  `BulletClass::WeaponType` was
   already printed by `scripts/linux/abi_probe.sh`; this round adds the
   compile-time assertion because the classic path dereferences the field.
   Reproduce every value with `scripts/linux/abi_probe.sh`.

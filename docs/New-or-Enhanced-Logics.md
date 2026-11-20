@@ -376,28 +376,33 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   produced them and no other projectile is affected.  The module itself is
   `[Features] Scatter` (default on): with the switch off every hook returns
   immediately and no key is read.
-- The shot only has a scatter to shape when the engine enters its own scatter
-  block: `Inaccurate=yes` + `Arcing=yes` for the two `Fire_At` branches, and
-  `FlakScatter=yes` + `Inviso=yes` for the classic `BulletClass::MoveTo` path.
-  The keys on a projectile that never takes one of those paths do nothing.
+- The three engine shaping paths only have a scatter when the engine enters
+  its own scatter block: `Inaccurate=yes` + `Arcing=yes` for the two `Fire_At`
+  branches, and `FlakScatter=yes` + `Inviso=yes` for the classic
+  `BulletClass::MoveTo` path.  An engine-guided projectile is the exception: it
+  is displaced by the platform itself and does not need (and never enters) those
+  blocks - see "Guided missiles" below.
 - The radius is controlled by `Min` / `Max` (floating point cells, x256 =
   leptons, the radius at the weapon's full range), `Sigma` (radius-distribution
   exponent, default 0.5 = area-uniform), `Aspect` (area-preserving ellipse
   ratio, default 1 = no ellipse) and `Chance` (per-shot scatter probability,
   default 1).  The distance ramp is controlled by `Divergence`, whose fallback
   is the module-wide `[General] LW.Divergence` (default 0.5).  The
-  `IncreaseByRange` family is read but **not applied** in this build, and
-  `Physical` (B16) is a later commit of the round.  The burst-point scatter
-  (B14/6A, see "The burst point" below) is in this build and uses the same keys.
-- The platform draws **no random number of its own**.  `Chance` uses the host's
-  own radius draw as the coin: the draw is uniform, so it passes with
-  probability exactly `Chance`, and a passing draw is divided by `Chance` so it
-  stays uniform on `[0, 1]` (the radius distribution of the scattering shots is
-  unchanged).  A failing roll writes a zero radius: that shot goes to the aim
-  point unscattered.
+  `IncreaseByRange` family is read but **not applied** in this build.  An
+  engine-guided projectile uses the same keys for its physical flight offset
+  (see "Guided missiles" below); there is no separate `Physical` key.
+- The three engine shaping paths draw **no random number of their own**.
+  `Chance` uses the host's own radius draw as the coin: the draw is uniform, so
+  it passes with probability exactly `Chance`, and a passing draw is divided by
+  `Chance` so it stays uniform on `[0, 1]` (the radius distribution of the
+  scattering shots is unchanged).  A failing roll writes a zero radius: that
+  shot goes to the aim point unscattered.  The guided-projectile paths are the
+  documented exception: they draw two numbers (at launch for a missile, on the
+  detonation frame for a fuse-only projectile), see below.
 - The configuration is read once when `rules(md).ini` is parsed and never
-  changes during a battle; it is not part of the savegame and the feature keeps
-  no per-object state (see "Savegame and multiplayer" below).
+  changes during a battle.  The only per-object state is the physical offset of
+  a moving missile (transient, never serialized; see "Savegame and multiplayer"
+  below).
 
 In `rulesmd.ini`:
 ```ini
@@ -453,9 +458,10 @@ LW.Divergence=0.5                       ; floating point, the global fallback of
   host's default draw window, and a host key moves exactly that window, so
   shaping against it would be wrong.  The projectile then keeps the host
   scatter.  Remove the old keys when moving a projectile over.
-- `Physical` (B16) is not in this build yet - the round's next commit adds it.
-  The burst-point scatter is in this build; unlike the three shaping paths it
-  needs both `Min` and `Max` (see "The burst point").
+- There is no `Physical` key: a guided projectile that writes the platform's
+  scatter keys is physically scattered automatically (see "Guided missiles").
+  Unlike the three shaping paths, the guided-projectile entries need both `Min`
+  and `Max` written.
 ```
 
 ### The three engine paths
@@ -496,36 +502,54 @@ LW.Divergence=0.5                       ; floating point, the global fallback of
   horizontal muzzle -> aim direction; a shot straight up or down has no flight
   line in the 2-D plane and is left circular.
 
-### The burst point (ROT / Arm missiles, B14/6A)
+### Guided missiles: the physical flight offset (B16)
 
-- The engine steers a projectile with `ROT > 0` or `Arm > 0` (the vanilla
-  guided-missile kinds) towards the centre of the live target on every frame, and
-  neither of its own scatter paths reaches such a projectile (the `Fire_At` block
-  needs `Inaccurate` + `Arcing`, the classic path `FlakScatter` + `Inviso`).
-  Even a launch offset would be steered away again.  The platform therefore
-  displaces the **burst point** instead.
-- Gate: `Inaccurate=yes`, `ROT > 0` or `Arm > 0`, no `Arcing`, no `Inviso`, and
-  **both** `LW.BallisticScatter.Min` and `.Max` written.  The explicit pair is
-  required because this path has no host draw window to fall back on; a section
-  that writes only one of the two keeps the engine's burst point (the platform
-  logs a warning when that section is read).
-- The offset reuses the same recipe: `Min` / `Max` at full range, `Sigma`
-  (default 0.5), the `Divergence` ramp of the distance actually flown, `Chance`,
-  and the area-preserving `Aspect` ellipse aligned with the chord from the burst
-  point back to the launch point.  The base is the engine's own burst point, so a
-  `Ranged` early detonation explodes where it happened (with the ramp of the
-  shorter distance) instead of jumping onto the target.
-- This is the **only** path of the module that draws random numbers: two draws on
-  the detonation frame from the scenario's synchronised RNG (radius fraction,
-  then angle fraction).  Both ends of a multiplayer match draw on the same frame
-  and compute the same point; the battle's random-number stream differs from
-  vanilla for the projectiles that use this path (a deliberate, documented
-  difference - the fork behaves the same way).
-- The projectile still flies to the target centre; only the warhead explodes
-  off-centre.  A `Cluster>1` projectile keeps the engine's own cluster scatter
-  layered on top of the displaced centre.  The offset does not apply to an
-  `Arcing` / `Inviso` projectile (both already scatter) or without `Inaccurate`
-  (the engine's snap code would overwrite the point again).
+- The engine steers a `ROT > 0` projectile to the centre of the live target on
+  every frame, and neither of its own scatter paths reaches such a projectile
+  (the `Fire_At` block needs `Inaccurate` + `Arcing`, the classic path
+  `FlakScatter` + `Inviso`).  A platform-scattered missile is therefore
+  **physically displaced**: the offset is drawn once at launch, the guidance aim
+  point is moved by it on every frame and the missile is set off at that point,
+  so it really flies to the scattered point.
+- This is **automatic** when the projectile uses the platform's keys - there is
+  no separate `Physical` switch.  (The fork's `BallisticScatter.Physical` was a
+  deliberate opt-in during its exploration phase; this platform treats "a
+  missile uses the new scatter logic" as "the missile is physically scattered".)
+- Gate: `Inaccurate=yes`, `ROT > 0`, no `Arcing`, no `Inviso`, and **both**
+  `LW.BallisticScatter.Min` and `.Max` written.  The explicit pair is required
+  because this path has no host draw window to fall back on; a section that
+  writes only one of the two keeps the engine's own point and is warned about
+  when it is read.
+- The offset uses the same recipe: `Min` / `Max` at full range, `Sigma`
+  (default 0.5), the `Divergence` ramp of the launch distance
+  (`|target - launch point| / weapon range`), `Chance`, and the area-preserving
+  `Aspect` ellipse aligned with the launch line.  The aim point is clamped into
+  the map (one cell inside each edge) because the engine silently removes a
+  bullet whose position is illegal; that is map safety, not a scatter cap.
+- Two random numbers are drawn **on the launch frame** from the scenario's
+  synchronised RNG (radius fraction, then angle fraction); the rest of the
+  flight only reads the stored offset, so both ends of a multiplayer match
+  compute the same point.  The battle's random-number stream differs from
+  vanilla for the projectiles that use the path (deliberate, documented).
+- The missile keeps its engine guidance, so it flies a real curve to the
+  scattered point; a `Cluster>1` projectile explodes there and the engine's
+  cluster scatter is layered around the displaced centre.  A lost target does
+  not cancel the shot: the missile keeps flying to the last aim point.
+- The offset does not apply to an `Arcing` / `Inviso` projectile (both already
+  scatter) or without `Inaccurate` (the engine's burst-point snap code would
+  pull the detonation back to the target centre).
+
+### The burst point (Arm-only fuses, B14/6A)
+
+- A projectile with `Arm > 0` but no `ROT` has a fuse but no guidance, so the
+  platform cannot move its flight path.  Its **burst point** is displaced
+  instead, on the detonation frame, when it is `Inaccurate=yes`, no
+  `Arcing` / `Inviso`, and writes both bounds.
+- The recipe is the same, with the distance actually flown as the ramp input;
+  the two random numbers are drawn on the detonation frame.  The projectile
+  still flies to its own impact point - only the warhead explodes off-centre.
+- This is the fallback of the physical path, not a separate configuration: a
+  guided missile (`ROT > 0`) always takes the physical path.
 
 ### Co-loads and the old key family
 
@@ -555,11 +579,14 @@ LW.Divergence=0.5                       ; floating point, the global fallback of
   savegame.
 - The three shaping paths draw no random number of their own: `Chance` reuses the
   host's draw and every site only rewrites a value the host already produced, so
-  for those paths the random-number stream is exactly the host's.  The
-  burst-point path is the documented exception: it draws two numbers on the
-  detonation frame from the synchronised RNG (both ends of a match draw on the
-  same frame, so the point is identical; the stream differs from vanilla for the
-  projectiles that use that path).
+  for those paths the random-number stream is exactly the host's.  The guided
+  paths are the documented exception: a missile draws two numbers on the launch
+  frame and a fuse-only projectile on the detonation frame, both from the
+  synchronised RNG (both ends of a match draw on the same frame, so the point is
+  identical; the stream differs from vanilla for the projectiles that use it).
+- The physical offset is transient per-bullet state, not savegame state: a
+  scenario clear drops it (the affected missiles fall back to the engine's own
+  guidance) and nothing is written to the savegame.
 - A projectile that writes at least one `LW.` key is shaped and, with the
   platform defaults, deliberately **not** bit-identical to vanilla: the default
   `Sigma` is 0.5 (area-uniform) and the ramp defaults to the global `Divergence`
@@ -577,9 +604,13 @@ in the following points on purpose:
 - **No extra random draws on the shaping paths**: the fork redraws the radius on
   the classic path and draws a coin for its `Chance`; the platform reuses the
   host's draw for both, so a co-loaded host's random-number stream (and the
-  multiplayer synchronisation it carries) is untouched.  The burst-point path is
-  the exception on both sides: it draws its two numbers explicitly (see "The
-  burst point" above), exactly like the fork's B14/6A.
+  multiplayer synchronisation it carries) is untouched.  The guided paths are
+  the exception on both sides: they draw their two numbers explicitly (see
+  "Guided missiles" / "The burst point" above).
+- **No `Physical` key**: the fork requires `BallisticScatter.Physical=yes` for
+  its physical flight offset and otherwise keeps the burst-point-only behaviour;
+  the platform treats the platform scatter keys on a guided missile as physical
+  automatically (user decision 2026-11-20: no user-visible distinction).
 - **`Min` / `Max` mean the radius at full range on every path**: the fork keeps
   each engine path's own magnitude (its classic path doubles the values because
   the engine draws `U[0, 2 * global]` there); the platform normalizes every path
@@ -590,7 +621,7 @@ in the following points on purpose:
 
 ### Implementation notes (platform)
 
-- Eight hooks (`docs/HookCatalogue.md`): `0x46C41C/0xA` reads the projectile's
+- Twelve hooks (`docs/HookCatalogue.md`): `0x46C41C/0xA` reads the projectile's
   keys in the `BulletTypeClass::LoadFromINI` success epilogue (ESI = the type,
   `CCINIClass*` at `[esp+0x90]`; the failure path is not hooked; shared with
   Ares / Kratos / official Phobos / Mix, all return 0); `0x6FE67D/6` captures a
@@ -600,9 +631,18 @@ in the following points on purpose:
   `0x6FE821/6` remaps the legacy-branch draw and adds its ramp (the post-Ares
   entry); `0x6FE8EE/6` applies the true ellipse at the scatter block's exit;
   `0x4687F8/6` shapes the classic radius (last in the official Phobos / Mix /
-  fork chain); `0x468DCF/6` rewrites the burst coordinate in
-  `BulletClass::Explode` just before the `Inaccurate` branch jumps over the
-  target snap (free in the audited co-load set - the fork uses `0x468FF4`,
+  fork chain); `0x4688A9/6` draws the physical offset at the `MoveTo` merge
+  point (shared with the official Phobos / Mix obstacle handlers, which return
+  non-zero only for Inviso bullets); `0x466BAF/6` moves the guidance aim point
+  every frame (free in the audited co-load set; the stolen
+  `mov ecx,ds:0x8871E0` is replayed through `R->ECX`); `0x4677D3/5` sets the
+  missile off on the frame whose path passes the aim point and returns the
+  engine's `Detonate` (the official Phobos / Mix / fork handlers return non-zero
+  only for trajectory projectiles); `0x4665E9/0xA` drops the per-bullet state in
+  the bullet destructor (shared with all five audited platforms, all return 0);
+  `0x468DCF/6` rewrites the burst coordinate in `BulletClass::Explode` just
+  before the `Inaccurate` branch jumps over the target snap (the fallback for an
+  `Arm`-only fuse; free in the audited co-load set - the fork uses `0x468FF4`,
   which the official Phobos / Mix / fork occupy with non-zero returns).
 - `[General] LW.Divergence` is read through the platform's rules-INI
   notification (`0x6686C0`, `IniTakeover::RegisterRulesIniObserver`) when the
@@ -747,21 +787,23 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
   `LW.BallisticScatter.*` 键，该抛射体就被整形；一个键都不写的抛射体保持宿主的
   **逐位**行为——它的射击完全按宿主产出的结果保留，也不影响其它抛射体。模块本身
   由 `[Features] Scatter`（默认开）控制：关掉后所有 hook 立即返回、不读任何键。
-- 只有引擎真正进入自己的散布块时才有散布可整形：两条 `Fire_At` 分支要求
-  `Inaccurate=yes` + `Arcing=yes`，经典的 `BulletClass::MoveTo` 路径要求
-  `FlakScatter=yes` + `Inviso=yes`。从不走这些路径的抛射体，写了键也不起作用。
+- 三条引擎整形路径只在引擎真正进入自己的散布块时才有散布可整形：两条 `Fire_At`
+  分支要求 `Inaccurate=yes` + `Arcing=yes`，经典的 `BulletClass::MoveTo` 路径要求
+  `FlakScatter=yes` + `Inviso=yes`。**引擎制导的抛射体是例外**：它由平台自己位移，
+  不需要（也从不进入）这些散布块——见下文"导弹物理飞偏"。
 - 半径由 `Min` / `Max`（浮点，单位格，x256 = leptons，含义是武器满射程处的半径）、
   `Sigma`（半径分布指数，默认 0.5 = 面积均匀）、`Aspect`（面积等分的椭圆比例，
   默认 1 = 不做椭圆）、`Chance`（单发散布概率，默认 1）控制。距离斜坡由
   `Divergence` 控制，缺省时取模块级 `[General] LW.Divergence`（默认 0.5）。
-  `IncreaseByRange` 族在本构建**只读不生效**；`Physical`（B16）与爆发点散布是
-  本轮后续提交，本构建不读。
-- 平台**不抽任何随机数**。`Chance` 直接拿宿主自己的半径抽样当硬币：抽样在
-  `[0, 1]` 上均匀，因此通过概率正好是 `Chance`；通过的样本再除以 `Chance`，仍
-  均匀分布在 `[0, 1]` 上（会散布的那些发数的半径分布因此不变）。不通过时写 0
-  半径：那一发不散布，直接飞向瞄准点。
-- 配置在解析 `rules(md).ini` 时读取一次，战斗中不再变化；不进存档，功能本身也
-  没有 per-object 状态（见下文"存档与联机"）。
+  `IncreaseByRange` 族在本构建**只读不生效**。引擎制导的抛射体用同一批键做
+  **物理飞偏**（见下文"导弹物理飞偏"）；**没有**单独的 `Physical` 键。
+- **三条引擎整形路径**上平台**不抽任何随机数**。`Chance` 直接拿宿主自己的半径
+  抽样当硬币：抽样在 `[0, 1]` 上均匀，因此通过概率正好是 `Chance`；通过的样本再
+  除以 `Chance`，仍均匀分布在 `[0, 1]` 上（会散布的那些发数的半径分布因此不变）。
+  不通过时写 0 半径：那一发不散布，直接飞向瞄准点。**制导弹道是文档化的例外**：
+  它抽两个数（导弹在发射帧抽，引信弹在引爆帧抽），见下文。
+- 配置在解析 `rules(md).ini` 时读取一次，战斗中不再变化。唯一的 per-object 状态是
+  飞行中导弹的物理偏移（临时、不序列化；见下文"存档与联机"）。
 
 在 `rulesmd.ini` 中：
 ```ini
@@ -808,8 +850,9 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   `Sigma`、`Aspect`、`Divergence`）混写会让整份平台配置作废（并告警）：平台是拿
   宿主的默认抽样窗口做归一化的，而宿主键改的正是这个窗口，照它整形会算错；该
   抛射体保持宿主散布。迁移抛射体时请把旧键删掉。
-- `Physical`（B16）本构建还没有，要等本轮下一提交；爆点散布本构建已有，但与三条
-  整形路径不同，它要求 `Min` 与 `Max` 两个键都写（见"爆点散布"节）。
+- **没有 `Physical` 键**：制导抛射体只要写了平台的散布键就自动物理飞偏（见
+  "导弹物理飞偏"）。与三条整形路径不同，制导抛射体的两条入口都要求 `Min` 与
+  `Max` 两个键都写。
 ```
 
 ### 三条引擎路径
@@ -842,26 +885,41 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   飞行线取该发水平方向的炮口 -> 瞄准点方向；垂直上 / 下射击在 2-D 平面里没有
   飞行线，保持圆形。
 
-### 爆点散布（ROT / Arm 导弹，B14/6A）
+### 导弹物理飞偏（ROT > 0 制导导弹，B16）
 
-- 引擎每帧把 `ROT > 0` 或 `Arm > 0` 的抛射体（原版自寻的 / 引信计时导弹）转向
-  活体目标的中心，而且引擎自己的两条散布路径都进不去（`Fire_At` 块要求
-  `Inaccurate` + `Arcing`，经典路径要求 `FlakScatter` + `Inviso`）；即使发射时
-  抽出了偏移，制导也会把它带回目标中心。所以平台改为偏移**爆点**。
-- 门控：`Inaccurate=yes`、`ROT > 0` 或 `Arm > 0`、没有 `Arcing`、没有 `Inviso`，
-  并且 `LW.BallisticScatter.Min` 与 `.Max` **两个都写**。必须显式给一对边界，是
-  因为这条路径没有宿主抽样窗口可以回退；只写一个键的段保持引擎爆点（平台在读取
-  该段时会告警）。
-- 偏移沿用同一套配方：满射程处的 `Min` / `Max`、`Sigma`（默认 0.5）、按**实际
-  飞行距离**取 `Divergence` 斜坡、`Chance`，以及沿"爆点 -> 发射点"连线对齐的
-  面积等分 `Aspect` 椭圆。基准点是引擎自己算出的爆点，所以 `Ranged` 提前引爆
-  就在当时的位置炸（按较短距离的斜坡），不会瞬移到目标身上。
-- 这是模块里**唯一**自己抽随机数的路径：引爆帧从场景的同步 RNG 抽两个数（先
-  半径分数、再角度分数）。联机双端在同一帧抽样，算出的点一致；用了这条路径的
-  弹种会让整局的随机数流与纯原版不同（刻意且有文档的差异，fork 同口径）。
-- 弹体仍然飞向目标中心，只有战斗部偏着炸。`Cluster>1` 的弹保留引擎自己的集束
-  散布，叠在已偏移的中心之上。`Arcing` / `Inviso` 的弹（两者本来就散布）与
-  没有 `Inaccurate` 的弹不施加这个偏移（否则引擎的吸附代码会把爆点改回去）。
+- 引擎每帧把 `ROT > 0` 的抛射体转向活体目标的中心，而且引擎自己的两条散布路径
+  都进不去（`Fire_At` 块要求 `Inaccurate` + `Arcing`，经典路径要求
+  `FlakScatter` + `Inviso`）；即使发射时抽出了偏移，制导也会把它带回目标中心。
+  所以平台直接**偏移导弹本身**：发射帧抽一次偏移，之后每帧把制导瞄准点平移这份
+  偏移，并在偏点把导弹引爆——导弹**真的飞向散布点**。
+- 只要抛射体用了平台的散布键，这就是**自动的**，没有单独的 `Physical` 开关。
+  （fork 的 `BallisticScatter.Physical` 是它在探索阶段留的显式开关；平台把
+  "导弹用了新散布逻辑"直接当作"物理飞偏"。用户 2026-11-20 拍板。）
+- 门控：`Inaccurate=yes`、`ROT > 0`、没有 `Arcing`、没有 `Inviso`，并且
+  `LW.BallisticScatter.Min` 与 `.Max` **两个都写**。必须显式给一对边界，是因为
+  这条路径没有宿主抽样窗口可以回退；只写一个键的段保持引擎自己的点（读取时告警）。
+- 偏移沿用同一套配方：满射程处的 `Min` / `Max`、`Sigma`（默认 0.5）、按**发射
+  距离**（`|目标 - 发射点| / 武器射程`）取 `Divergence` 斜坡、`Chance`，以及沿
+  发射连线对齐的面积等分 `Aspect` 椭圆。瞄准点在发射时会夹进地图（每条边向内
+  缩一格），因为引擎会静默移除位置非法的子弹；这是地图安全，不是散布上限。
+- **发射帧**从场景的同步 RNG 抽两个数（先半径分数、再角度分数），之后整个飞行
+  过程只读这份偏移，所以联机双端算出的点一致。用了这条路径的弹种会让整局的随机
+  数流与纯原版不同（刻意且有文档的差异）。
+- 导弹保留引擎制导，所以会画出真实的偏航曲线；`Cluster>1` 的弹在偏点爆炸，引擎
+  自己的集束散布再叠在偏移中心周围。目标丢失**不会**取消这一发：导弹继续飞向
+  最后一次算出的瞄准点。
+- `Arcing` / `Inviso` 的弹（两者本来就散布）与没有 `Inaccurate` 的弹不施加这个
+  偏移（否则引擎的爆点吸附代码会把落点拉回目标中心）。
+
+### 爆点散布（只有 Arm、没有 ROT 的引信弹，B14/6A）
+
+- `Arm > 0` 但 `ROT == 0` 的抛射体有引信、没有制导，平台无法移动它的飞行路径，
+  于是改为在**引爆帧**偏移它的**爆点**；门控是 `Inaccurate=yes`、没有 `Arcing` /
+  `Inviso`、两个边界都写。
+- 配方相同，但距离斜坡用**实际飞行距离**；两个随机数在引爆帧抽。弹体仍然飞向
+  自己的落点，只有战斗部偏着炸。
+- 这是物理飞偏的**自动回退**，不是另一套配置：`ROT > 0` 的制导导弹永远走物理
+  飞偏。
 
 ### 共载与旧键族
 
@@ -885,8 +943,10 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   东西——新旧存档可以互换，模块开关也不影响任何存档内容。
 - **三条整形路径 0 额外随机抽样**：它们的站点都不调用 RNG；`Chance` 复用宿主
   抽样，其它站点只改写宿主已经产出的数值，因此这几条路径上随机数流与宿主完全
-  一致。**爆点散布是文档化的例外**：它在引爆帧从同步 RNG 抽两个数（联机双端同帧
-  抽样，点一致；用了这条路径的弹种会改变整局随机数流）。
+  一致。**两条制导入口是文档化的例外**：导弹在发射帧、引信弹在引爆帧从同步 RNG
+  抽两个数（联机双端同帧抽样，点一致；用了这些路径的弹种会改变整局随机数流）。
+- **物理飞偏状态不入存档**：它是每颗子弹的临时状态，场景清理时整表丢弃（受影响的
+  导弹回退到引擎自己的制导），存档里不写任何东西。
 - 写了至少一个 `LW.` 键的抛射体即被整形，在平台默认值下**按设计不**与纯原版
   逐位一致：默认 `Sigma` 是 0.5（面积均匀），距离斜坡默认取全局 `Divergence` 0.5。
   一个 `LW.` 键都不写的抛射体则与宿主行为完全一致。
@@ -900,8 +960,11 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   的径向均匀（中心更密）。想要 fork 的默认分布，写 `Sigma=1`。
 - **三条整形路径不额外抽随机数**：fork 在经典路径上重抽半径，还会为 `Chance` 抽
   一次硬币；平台这两处都复用宿主抽样，所以共载宿主的随机数流（以及它所承载的
-  联机同步）不受影响。**爆点散布在两边都是例外**：它自己抽两个数（见上文
-  "爆点散布"），与 fork 的 B14/6A 相同。
+  联机同步）不受影响。**制导入口在两边都是例外**：它们自己抽两个数（见上文
+  "导弹物理飞偏" / "爆点散布"）。
+- **没有 `Physical` 键**：fork 要写 `BallisticScatter.Physical=yes` 才物理飞偏，
+  不写就仍是"只偏爆点"；平台把制导导弹的散布键直接当物理飞偏（用户 2026-11-20
+  拍板：不做用户可见的区分）。
 - **`Min` / `Max` 在每条路径上都表示满射程处半径**：fork 保留各引擎路径自己的
   量级（它的经典路径因为引擎在那里抽 `U[0, 2 * global]` 而把数值翻倍）；平台把
   每条路径都归一到同一个满射程半径。
@@ -910,7 +973,7 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
 
 ### 实现说明（平台）
 
-- 八个 hook（`docs/HookCatalogue.md`）：`0x46C41C/0xA` 在
+- 十二个 hook（`docs/HookCatalogue.md`）：`0x46C41C/0xA` 在
   `BulletTypeClass::LoadFromINI` 成功尾声读抛射体的键（ESI = 类型，
   `CCINIClass*` 在 `[esp+0x90]`；失败路径不钩；与 Ares / Kratos / 官方 Phobos /
   Mix 同址，全部返回 0）；`0x6FE67D/6` 捕获一发（抛射体类型、未散布的瞄准基点、
@@ -918,8 +981,14 @@ LW.Divergence=0.5                       ; 浮点，逐抛射体键的全局缺�
   的入口）；`0x6FE73F/6` 替换可见分支的距离缩放；`0x6FE821/6` 重映射旧分支抽样并
   补距离斜坡（Ares 之后的入口）；`0x6FE8EE/6` 在散布块出口施加真椭圆；
   `0x4687F8/6` 整形经典路径半径（官方 Phobos / Mix / fork 链上的最后一个）；
-  `0x468DCF/6` 在 `BulletClass::Explode` 里、`Inaccurate` 分支跳过目标吸附的
-  `jne` 之前改写爆点坐标（在已审计的共载集里是空站点——fork 用的 `0x468FF4`
+  `0x4688A9/6` 在 `MoveTo` 汇合点给制导导弹抽物理偏移（与官方 Phobos / Mix 的
+  障碍物 handler 同址，它们只对 Inviso 弹返回非 0）；`0x466BAF/6` 每帧平移制导
+  瞄准点（共载集里是空站点；被偷的 `mov ecx,ds:0x8871E0` 用 `R->ECX` 重放）；
+  `0x4677D3/5` 在本帧路径经过偏点时让导弹自爆并返回引擎的 `Detonate`（官方
+  Phobos / Mix / fork 只对有轨迹的弹返回非 0）；`0x4665E9/0xA` 在子弹析构时清掉
+  per-bullet 状态（五家生态同址，全部返回 0）；`0x468DCF/6` 在
+  `BulletClass::Explode` 里、`Inaccurate` 分支跳过目标吸附的 `jne` 之前改写爆点
+  坐标（Arm-only 引信弹的回退；在已审计的共载集里是空站点——fork 用的 `0x468FF4`
   被官方 Phobos / Mix / fork 的非 0 返回占住）。
 - `[General] LW.Divergence` 走平台的 rules-INI 通知（`0x6686C0`，
   `IniTakeover::RegisterRulesIniObserver`）：引擎解析完 `rules(md).ini`、抛射体段

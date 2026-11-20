@@ -1,11 +1,13 @@
 // ---------------------------------------------------------------------------
 // Scatter core feature module (P1 / R10) - the engine hooks.
 //
-// The module shapes the scatter the host has already produced; it never draws a
-// random number of its own (see ScatterMath.h).  The sites and their windows
-// were audited instruction by instruction against the supported gamemd build
-// (the round's engine-site record in the workspace) and against the Ares /
-// Kratos / official Phobos / Mix hook tables:
+// The module shapes the scatter the host has already produced, and displaces
+// engine-guided projectiles itself (the only two entries that draw random
+// numbers: at launch for a guided missile, on the detonation frame for a
+// fuse-only projectile; see ScatterMath.h).  The sites and their windows were
+// audited instruction by instruction against the supported gamemd build (the
+// round's engine-site record in the workspace) and against the Ares / Kratos /
+// official Phobos / Mix hook tables:
 //
 //   TechnoClass::Fire_At scatter block (0x6FE67D .. 0x6FE8EE)
 //     0x6FE67D / 6 - the block decided to run (je for !Inaccurate): capture the
@@ -51,27 +53,26 @@
 //                     feature-local type table.  Ares / Kratos / official
 //                     Phobos / Mix hook the same site and all return 0.
 //
-//   BulletClass::Explode burst point (0x468DCF)
+//   Engine-guided projectiles (the platform's own displacement, B16 / B14)
+//     0x4688A9 / 6 - BulletClass::MoveTo merge point: for a ROT > 0 missile that
+//                     writes both bounds, draw the physical scatter offset once
+//                     and register the per-bullet state (see the block comment
+//                     above the handler).
+//     0x466BAF / 6 - per frame in the guidance block: move the engine's aim
+//                     point by the offset and let the proximity fuse follow it.
+//     0x4677D3 / 5 - per frame at the head of the detonation chain: set the
+//                     missile off where it is steering (segment test).
+//     0x4665E9 / 0xA - BulletClass destructor: drop the per-bullet state.
 //     0x468DCF / 6 - the Inaccurate branch's `jne 0x468FF4`, i.e. the jump that
-//                     skips every target snap.  The engine steers a ROT / Arm
-//                     projectile to the centre of the live target on every
-//                     frame, so its launch offset cannot survive and the burst
-//                     point is the only place that can be displaced (B14/6A).
-//                     The handler only acts for such a projectile when it is
-//                     also `Inaccurate` (otherwise the engine's snap code would
-//                     overwrite the point again), not `Arcing` / `Inviso` (both
-//                     already scatter elsewhere) and when it writes both
-//                     `LW.BallisticScatter.Min` and `.Max` (the burst path has
-//                     no host draw window to fall back on).  It rewrites
-//                     [esp+0xC..0x14] and returns 0, so the replayed jump carries
-//                     the new point into the Airburst / Cluster / Detonate
-//                     paths.  This is the only site of the module that draws
-//                     random numbers: two draws from the scenario's synchronised
-//                     RNG (ScenarioClass::Instance->Random) on the detonation
-//                     frame.  The fork's 0x468FF4 site cannot be used: the
-//                     official Phobos / Mix / fork handlers there always return
-//                     non-zero and this DLL is last in the chain, so a handler
-//                     there never runs.
+//                     skips every target snap.  This is the burst-point fallback
+//                     for a fuse-only projectile (`Arm > 0`, no `ROT`), which
+//                     has no guidance to move: the handler rewrites
+//                     [esp+0xC..0x14] on the detonation frame and returns 0, so
+//                     the replayed jump carries the new point into the Airburst /
+//                     Cluster / Detonate paths.  The fork's 0x468FF4 site cannot
+//                     be used: the official Phobos / Mix / fork handlers there
+//                     always return non-zero and this DLL is last in the chain,
+//                     so a handler there never runs.
 //
 // Every handler returns 0, i.e. the trampoline replays the overridden
 // instruction(s).  The handlers only touch behaviour when the shooting
@@ -93,14 +94,21 @@
 
 using venture::features::scatter::ApplyFireAtDistance;
 using venture::features::scatter::ApplyScatterAspect;
+using venture::features::scatter::BeginPhysicalScatter;
 using venture::features::scatter::BurstOffset;
+using venture::features::scatter::ClampScatterAim;
+using venture::features::scatter::EndPhysicalScatter;
+using venture::features::scatter::FetchPhysicalScatter;
 using venture::features::scatter::FindConfig;
 using venture::features::scatter::HostBounds;
 using venture::features::scatter::IsEnabled;
 using venture::features::scatter::LoadScatterConfigFromIni;
 using venture::features::scatter::NormalizeDraw;
 using venture::features::scatter::NormalizeScatterAspect;
+using venture::features::scatter::kLeptonsPerCell;
 using venture::features::scatter::NormalizeScatterChance;
+using venture::features::scatter::PhysicalScatterState;
+using venture::features::scatter::ScatterAimBounds;
 using venture::features::scatter::ScatterConfig;
 using venture::features::scatter::ScatterPath;
 using venture::features::scatter::ShapeBurstOffset;
@@ -306,6 +314,52 @@ void LogBurstShot(const BulletTypeClass* const pType, const double u, const doub
 			   "divergence=%.2f aspect=%.2f offset=(%d,%d) at=(%d,%d)",
 		pType->ID, u, chance, burst.ShapedRadius, burst.Radius, distance, range, config.Divergence,
 		NormalizeScatterAspect(config.Aspect), burst.OffsetX, burst.OffsetY, afterX, afterY);
+}
+
+// One bounded debug line per physical-scatter launch (B16): the sample, the aim
+// point the missile is now steering at, and whether the map clamp moved it.
+void LogPhysicalLaunch(const BulletTypeClass* const pType, const double u, const double distance,
+	const int range, const ScatterConfig& config, const BurstOffset& offset, const CoordStruct& base,
+	const CoordStruct& aim, const bool clamped)
+{
+	if (!ShouldLogShot(pType))
+		return;
+
+	const double chance = NormalizeScatterChance(config.Chance);
+
+	if (offset.ChanceMiss)
+	{
+		Log::Debug("[Scatter] physical type=%s u=%.3f chance=%.2f dist=%.0f range=%d -> no scatter "
+				   "(chance miss)",
+			pType->ID, u, chance, distance, range);
+		return;
+	}
+
+	if (!offset.Scatter)
+	{
+		Log::Debug("[Scatter] physical type=%s u=%.3f chance=%.2f dist=%.0f range=%d -> no scatter "
+				   "(zero radius)",
+			pType->ID, u, chance, distance, range);
+		return;
+	}
+
+	Log::Debug("[Scatter] physical type=%s u=%.3f chance=%.2f shaped=%d final=%d dist=%.0f range=%d "
+			   "divergence=%.2f aspect=%.2f offset=(%d,%d) at=(%d,%d) aim=(%d,%d,%d) clamped=%d",
+		pType->ID, u, chance, offset.ShapedRadius, offset.Radius, distance, range, config.Divergence,
+		NormalizeScatterAspect(config.Aspect), aim.X - base.X, aim.Y - base.Y, base.X, base.Y, aim.X,
+		aim.Y, aim.Z, clamped ? 1 : 0);
+}
+
+// One bounded debug line when a physical-scatter missile sets itself off, so the
+// in-game check can see that the burst really happened at the scattered point.
+void LogPhysicalDetonate(const BulletTypeClass* const pType, const CoordStruct& at,
+	const CoordStruct& aim, const double distance)
+{
+	if (!ShouldLogShot(pType))
+		return;
+
+	Log::Debug("[Scatter] physical detonate type=%s at=(%d,%d,%d) aim=(%d,%d,%d) dist=%.0f",
+		pType->ID, at.X, at.Y, at.Z, aim.X, aim.Y, aim.Z, distance);
 }
 } // namespace
 
@@ -536,20 +590,23 @@ DEFINE_HOOK(0x4687F8, Venture_Scatter_ClassicRadius, 0x6)
 }
 
 // BulletClass::Explode, the Inaccurate branch's `jne 0x468FF4` (the jump over
-// every target snap): the engine steers a ROT / Arm projectile to the centre of
-// the live target on every frame, so the burst point is the only place a scatter
-// can survive (B14/6A).  The local burst coordinate is [esp+0xC..0x14] (seeded
-// from bullet->Location at 0x468D96; the function has no frame pointer).  The
-// handler rewrites it and returns 0, so the replayed jump carries the new point
-// into the Airburst / Cluster / Detonate paths.  Replaying the conditional jump
-// is safe because the platform refuses to run without SyringeEx's
+// every target snap): the burst-point fallback for a fuse-only projectile
+// (`Arm > 0`, no `ROT`), which has no guidance the platform could steer.  A
+// guided missile (`ROT > 0`) is handled by the physical flight offset instead
+// and deliberately skipped here.  The local burst coordinate is [esp+0xC..0x14]
+// (seeded from bullet->Location at 0x468D96; the function has no frame pointer).
+// The handler rewrites it and returns 0, so the replayed jump carries the new
+// point into the Airburst / Cluster / Detonate paths.  Replaying the conditional
+// jump is safe because the platform refuses to run without SyringeEx's
 // ZFPreservation (the engine's ZF) and ReladdrInstructionFixup (the relative
 // target); see src/Core/Platform.cpp.
 //
 // The gates are structural:
 //   * Inaccurate - the engine only skips the target snap when the flag is set;
 //     with it clear the snap code below would overwrite the point again;
-//   * ROT > 0 || Arm > 0 - the engine-guided kinds this path exists for;
+//   * ROT <= 0 && Arm > 0 - only the fuse-only kinds: a guided missile is
+//     physically scattered at launch, and scattering its burst point as well
+//     would draw two offsets for one projectile;
 //   * !Arcing && !Inviso - both already take an engine scatter path;
 //   * both LW.BallisticScatter.Min and .Max written - the burst path has no host
 //     draw window to fall back on (ScatterFeature warns about a partial pair).
@@ -568,8 +625,10 @@ DEFINE_HOOK(0x468DCF, Venture_Scatter_BurstPoint, 0x6)
 	const BulletTypeClass* const pType = pThis->Type;
 
 	// Every bullet explosion reaches this instruction, so the cheap flags are
-	// checked before the configuration lookup.
-	if (!pType || !pType->Inaccurate || (pType->ROT <= 0 && pType->Arm <= 0) || pType->Arcing
+	// checked before the configuration lookup.  A guided missile (`ROT > 0`) is
+	// scattered at launch by the physical path instead; only a fuse-only
+	// projectile reaches the shaping below.
+	if (!pType || !pType->Inaccurate || pType->ROT > 0 || pType->Arm <= 0 || pType->Arcing
 		|| pType->Inviso)
 		return 0;
 
@@ -607,6 +666,261 @@ DEFINE_HOOK(0x468DCF, Venture_Scatter_BurstPoint, 0x6)
 	}
 
 	LogBurstShot(pType, u, distance, range, *pConfig, burst, coords.X, coords.Y);
+
+	return 0;
+}
+
+// --- physical flight offset (B16) ------------------------------------------
+//
+// A ROT > 0 missile that writes both LW.BallisticScatter.Min and .Max is steered
+// at "target centre + offset" for its whole flight and set off at that point, so
+// it really flies to the scattered point instead of only exploding off-centre.
+// The offset is drawn once, at launch; the flight path only reads it.  There is
+// no separate opt-in key: using the platform's scatter keys on a guided missile
+// is the whole switch (user decision 2026-11-20 - the fork's Physical=yes split
+// is deliberately not ported).
+//
+//   0x4688A9 / 6 - BulletClass::MoveTo's merge point (the classic FlakScatter +
+//                  Inviso branch joins the plain path here).  TargetCoords and
+//                  SourceCoords are final, so this is where the offset is drawn
+//                  and the per-bullet state registered.  The official Phobos /
+//                  Mix handlers at this address return non-zero only for Inviso
+//                  bullets; a physical missile is never Inviso, so this handler
+//                  runs last in the chain.
+//   0x466BAF / 6 - per frame, inside the engine's guidance block: the aim point
+//                  it just computed ([esp+0x30..0x38]) is moved by the offset
+//                  and written back, and the proximity fuse's reference point
+//                  (Data.Location / Data.Distance) follows it.  The overridden
+//                  `mov ecx,ds:0x8871E0` is replayed through R->ECX.
+//   0x4677D3 / 5 - per frame, at the head of the engine's detonation chain: the
+//                  missile is set off on the frame whose flight segment passes
+//                  closest to the aim point (segment test, so a fast missile
+//                  cannot jump over it).  The official Phobos / Mix handlers
+//                  return non-zero only for projectiles that carry a trajectory
+//                  of their own; a physical missile has none.
+//   0x4665E9 / 0xA - BulletClass destructor: drop the per-bullet state (the
+//                  table is feature-local and non-savegame; a scenario clear
+//                  also empties it, see ScatterFeature.cpp).
+
+// BulletClass::MoveTo merge point: draw the physical scatter offset and register
+// the per-bullet state.  EBX = BulletClass*.
+DEFINE_HOOK(0x4688A9, Venture_Scatter_PhysicalInit, 0x6)
+{
+	if (!IsEnabled())
+		return 0;
+
+	GET(BulletClass*, pThis, EBX);
+
+	if (!pThis)
+		return 0;
+
+	const BulletTypeClass* const pType = pThis->Type;
+
+	// Only an engine-guided missile can be steered off its target: the guidance
+	// block opens on ROT > 0.  Inaccurate keeps the engine's burst-point snaps
+	// away from the final position (0x468DCF jumps over them); Arcing / Inviso
+	// already take an engine scatter path, so they must not be scattered twice.
+	if (!pType || pType->ROT <= 0 || !pType->Inaccurate || pType->Arcing || pType->Inviso)
+		return 0;
+
+	const ScatterConfig* const pConfig = FindConfig(pType);
+
+	if (!pConfig || !pConfig->MinSet || !pConfig->MaxSet)
+		return 0;
+
+	// MoveTo also runs when a bullet is repositioned: draw the offset once and
+	// never consume random numbers for a bullet that already has its state.
+	if (FetchPhysicalScatter(pThis))
+		return 0;
+
+	// Unlimbo wrote TargetCoords a few instructions earlier; a zero point means
+	// there is no aim to scatter around.
+	const CoordStruct base = pThis->TargetCoords;
+
+	if (base == CoordStruct::Empty)
+		return 0;
+
+	if (!ScenarioClass::Instance)
+		return 0;
+
+	const double distance = base.DistanceFrom(pThis->SourceCoords);
+
+	if (!(distance > 0.0))
+		return 0;
+
+	const int range = pThis->WeaponType ? pThis->WeaponType->Range : 0;
+
+	// One draw, radius fraction first and angle fraction second; both clients
+	// take the same two draws on the launch frame.
+	Randomizer& random = ScenarioClass::Instance->Random;
+	const double u = random.RandomDouble();
+	const double turn = random.RandomDouble();
+
+	const CoordStruct direction = base - pThis->SourceCoords;
+	const BurstOffset offset = ShapeBurstOffset(*pConfig, distance, static_cast<double>(range), u, turn,
+		direction.X, direction.Y);
+
+	if (!offset.Scatter)
+	{
+		LogPhysicalLaunch(pType, u, distance, range, *pConfig, offset, base, base, false);
+		return 0;
+	}
+
+	CoordStruct aim{base.X + offset.OffsetX, base.Y + offset.OffsetY, base.Z};
+
+	// Keep the aim on the map: an illegal bullet position makes the engine remove
+	// the bullet silently (no explosion, no damage).  Only the aim is clamped,
+	// not the configured radius.
+	const LTRBStruct& mapBounds = MapClass::Instance.MapCoordBounds;
+	const ScatterAimBounds aimBounds{
+		(mapBounds.Left + 1) * kLeptonsPerCell + kLeptonsPerCell / 2,
+		(mapBounds.Right - 1) * kLeptonsPerCell + kLeptonsPerCell / 2,
+		(mapBounds.Top + 1) * kLeptonsPerCell + kLeptonsPerCell / 2,
+		(mapBounds.Bottom - 1) * kLeptonsPerCell + kLeptonsPerCell / 2};
+	const bool clamped = ClampScatterAim(aim.X, aim.Y, aimBounds);
+
+	PhysicalScatterState state;
+	state.OffsetX = aim.X - base.X;
+	state.OffsetY = aim.Y - base.Y;
+	state.AimX = aim.X;
+	state.AimY = aim.Y;
+	state.AimZ = aim.Z;
+	state.ShapedRadius = offset.ShapedRadius;
+	state.Radius = offset.Radius;
+
+	if (!BeginPhysicalScatter(pThis, state))
+		return 0;
+
+	LogPhysicalLaunch(pType, u, distance, range, *pConfig, offset, base, aim, clamped);
+	return 0;
+}
+
+// BulletClass::Update, the guidance block: the engine has just worked out this
+// frame's aim point (target centre, or the building's target coordinate) and is
+// about to turn it into a steering direction.  Moving it here is what makes the
+// missile fly to the scattered point.  EBP = BulletClass*; the overridden
+// `mov ecx,ds:0x8871E0` is the function's RulesClass load.
+DEFINE_HOOK(0x466BAF, Venture_Scatter_PhysicalAim, 0x6)
+{
+	enum { Continue = 0x466BB5 };
+
+	GET(BulletClass*, pThis, EBP);
+
+	if (PhysicalScatterState* const pState = FetchPhysicalScatter(pThis))
+	{
+		REF_STACK(CoordStruct, aim, 0x30);
+
+		if (pThis->Target)
+		{
+			aim.X += pState->OffsetX;
+			aim.Y += pState->OffsetY;
+		}
+		else
+		{
+			// Target lost: the engine aims at the global null coordinate now.
+			// Keep flying to the point the missile was already steering at.
+			aim.X = pState->AimX;
+			aim.Y = pState->AimY;
+			aim.Z = pState->AimZ;
+		}
+
+		pState->AimX = aim.X;
+		pState->AimY = aim.Y;
+		pState->AimZ = aim.Z;
+
+		// The engine's proximity fuse reads both of these; centre it on the
+		// scattered point instead of the target centre.
+		pThis->Data.Location = aim;
+		pThis->Data.Distance = static_cast<int>(pThis->Location.DistanceFrom(aim));
+	}
+
+	R->ECX(reinterpret_cast<DWORD>(RulesClass::Instance));
+	return Continue;
+}
+
+// BulletClass::Update, head of the detonation chain: set a physical-scatter
+// missile off where it is steering.  The engine's own rules are built around the
+// target centre, so this is the primary trigger; the fuse (Data.Location) is
+// only a second line of defence.  The test is a segment test: the point on this
+// frame's flight path closest to the aim, so a fast missile cannot jump over the
+// aim between two frames.  EBP = BulletClass*; [esp+0x24..0x2C] is the position
+// this frame moved to.
+DEFINE_HOOK(0x4677D3, Venture_Scatter_PhysicalDetonate, 0x5)
+{
+	enum { Detonate = 0x467E53 };
+
+	GET(BulletClass*, pThis, EBP);
+
+	PhysicalScatterState* const pState = FetchPhysicalScatter(pThis);
+
+	// The fuse must have armed first; for an aircraft target the engine forces
+	// the arm time to 0, so anti-air shots are armed on the launch frame.
+	if (!pState || !pThis->Data.ArmTimer.Expired())
+		return 0;
+
+	REF_STACK(const CoordStruct, position, 0x24);
+
+	const CoordStruct aim{pState->AimX, pState->AimY, pState->AimZ};
+	const BulletVelocity& velocity = pThis->Velocity;
+	const double toAimX = static_cast<double>(aim.X - position.X);
+	const double toAimY = static_cast<double>(aim.Y - position.Y);
+	const double toAimZ = static_cast<double>(aim.Z - position.Z);
+	const double speedSquared = velocity.X * velocity.X + velocity.Y * velocity.Y + velocity.Z * velocity.Z;
+	const double projection = speedSquared > 0.0
+		? (toAimX * velocity.X + toAimY * velocity.Y + toAimZ * velocity.Z) / speedSquared
+		: -1.0;
+
+	// Closest point to the aim on this frame's path: 0 = where the frame started,
+	// 1 = the position the engine moved the bullet to.
+	CoordStruct closest = position;
+
+	if (projection >= 1.0)
+	{
+		closest.X += static_cast<int>(velocity.X);
+		closest.Y += static_cast<int>(velocity.Y);
+		closest.Z += static_cast<int>(velocity.Z);
+	}
+	else if (projection > 0.0)
+	{
+		closest.X += static_cast<int>(velocity.X * projection);
+		closest.Y += static_cast<int>(velocity.Y * projection);
+		closest.Z += static_cast<int>(velocity.Z * projection);
+	}
+
+	const double closestDistance = closest.DistanceFrom(aim);
+	const double step = std::sqrt(speedSquared);
+
+	if (projection <= 1.0 && closestDistance <= 32.0)
+	{
+		pThis->SetLocation(MapClass::Instance.CoordinatesLegal(closest) ? closest : aim);
+		LogPhysicalDetonate(pThis->Type, pThis->Location, aim, closestDistance);
+		return Detonate;
+	}
+
+	// Already past the aim (the previous frame's test can miss a fast shot).
+	if (projection < 0.0 && position.DistanceFrom(aim) <= step)
+	{
+		pThis->SetLocation(MapClass::Instance.CoordinatesLegal(position) ? position : aim);
+		LogPhysicalDetonate(pThis->Type, pThis->Location, aim, position.DistanceFrom(aim));
+		return Detonate;
+	}
+
+	return 0;
+}
+
+// BulletClass destructor: drop the per-bullet physical-scatter state.  The
+// window is the single 10-byte `mov dword [esi+0xAC],0` (two objdump lines);
+// ESI = BulletClass (ECX is not reliable here).  Ares / official Phobos /
+// Kratos / Mix / the fork hook the same address with size 0xA and return 0.
+DEFINE_HOOK(0x4665E9, Venture_Scatter_PhysicalDTOR, 0xA)
+{
+	if (!IsEnabled())
+		return 0;
+
+	GET(BulletClass*, pThis, ESI);
+
+	if (pThis)
+		EndPhysicalScatter(pThis);
 
 	return 0;
 }

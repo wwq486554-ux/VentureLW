@@ -178,6 +178,21 @@ static_assert(offsetof(BulletTypeClass, FlakScatter) == 0x2A3, "BulletTypeClass:
 static_assert(offsetof(BulletTypeClass, ROT) == 0x2DC, "BulletTypeClass::ROT moved - re-check the YRpp pin");
 static_assert(offsetof(BulletTypeClass, Arm) == 0x2F0, "BulletTypeClass::Arm moved - re-check the YRpp pin");
 static_assert(offsetof(RulesClass, BallisticScatter) == 0x1734, "RulesClass::BallisticScatter moved - re-check the YRpp pin");
+// The physical flight offset (B16): the launch site reads the target/source
+// coordinates and the weapon, the per-frame hook reads Velocity and Target and
+// writes the fuse reference (Data.Location / Data.Distance) that
+// BulletData::CheckProximityDetonation (0x4E11F0) compares against, the
+// detonation hook reads the arm timer, and the aim point is clamped into
+// MapClass::MapCoordBounds.  Measured with scripts/linux/abi_probe.sh; the
+// composite offsets match the engine listing (Data 0xB8 -> Location 0xD0,
+// Distance 0xDC, ArmTimer 0xC4).
+static_assert(offsetof(BulletClass, Data) == 0xB8, "BulletClass::Data moved - re-check the YRpp pin");
+static_assert(offsetof(BulletData, ArmTimer) == 0xC, "BulletData::ArmTimer moved - re-check the YRpp pin");
+static_assert(offsetof(BulletData, Location) == 0x18, "BulletData::Location moved - re-check the YRpp pin");
+static_assert(offsetof(BulletData, Distance) == 0x24, "BulletData::Distance moved - re-check the YRpp pin");
+static_assert(offsetof(BulletClass, Velocity) == 0xE8, "BulletClass::Velocity moved - re-check the YRpp pin");
+static_assert(offsetof(BulletClass, Target) == 0x10C, "BulletClass::Target moved - re-check the YRpp pin");
+static_assert(offsetof(MapClass, MapCoordBounds) == 0x124, "MapClass::MapCoordBounds moved - re-check the YRpp pin");
 
 // Syringe register frame layout (Syringe.h, SYR_VER=2). A wrong sized frame
 // silently corrupts every hook handler.

@@ -102,6 +102,17 @@ int __cdecl main()
 	SHOW_OFF(BulletTypeClass, Arm);
 	SHOW_OFF(RulesClass, BallisticScatter);
 
+	// Fields bound by the physical flight offset (B16): the missile's identity,
+	// its per-frame velocity and target, the proximity-fuse reference (Data) and
+	// the map rectangle the aim point is clamped into.  Pinned in EngineCompat.h.
+	SHOW_OFF(BulletClass, Data);
+	SHOW_OFF(BulletData, ArmTimer);
+	SHOW_OFF(BulletData, Location);
+	SHOW_OFF(BulletData, Distance);
+	SHOW_OFF(BulletClass, Velocity);
+	SHOW_OFF(BulletClass, Target);
+	SHOW_OFF(MapClass, MapCoordBounds);
+
 	SHOW(REGISTERS);
 	return 0;
 }

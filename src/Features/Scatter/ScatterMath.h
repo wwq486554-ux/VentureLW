@@ -34,12 +34,22 @@
 //      post-processing site; the classic path has none (see the round's
 //      handover manual, section 3.2), so it is radius-shaped only.
 //
-// The burst point (B14/6A, ShapeBurstOffset) is a different entry point: a
-// ROT / Arm projectile is guided by the engine to the centre of the live target
-// every frame, so its launch offset cannot survive - the burst point is displaced
-// instead, and that displacement is the one place in the module that draws its
-// own random numbers (two draws on the detonation frame, from the synchronised
-// scenario RNG; see the section at the bottom of this header).
+// A ROT / Arm projectile cannot use the shaped paths above: the engine guides it
+// to the centre of the live target every frame (so a launch offset is steered
+// away) and it never enters the engine's scatter blocks.  The module therefore
+// displaces the projectile itself, with the same offset recipe (ShapeBurstOffset,
+// at the bottom of this header):
+//
+//   * ROT > 0 (an engine-guided missile): the offset is drawn once at launch,
+//     the guidance aim point is moved by it on every frame, and the missile is
+//     set off at that point - the missile really flies to the scattered point
+//     (the design calls this the physical flight offset, B16);
+//   * Arm > 0 without ROT (a fuse-only projectile, no guidance to move): only
+//     the burst point is displaced, at the detonation frame (B14/6A).
+//
+// Those two entries are the only places in the module that draw random numbers,
+// from the synchronised scenario RNG (two draws, so both ends of a multiplayer
+// match compute the same point).
 //
 // Delta against the fork (Phobos-LWModified), all of it deliberate:
 //   * zero new random draws on the three shaping paths - the fork redraws the
@@ -463,28 +473,37 @@ inline void ApplyScatterAspect(int& offsetX, int& offsetY, const int directionX,
 	offsetY = static_cast<int>(std::lround(alongNew * uy + lateralNew * ux));
 }
 
-// --- the burst point (B14/6A) ----------------------------------------------
+// --- the guided-projectile offset (physical flight / burst point) ----------
 //
 // A ROT / Arm projectile is steered by the engine towards the centre of the live
 // target on every frame, so neither Fire_At branch can displace where it goes
 // off: they only write the launch velocity and the guidance then follows the
-// target straight back to its centre.  The burst point is therefore the only
-// place that can be moved without touching the guidance source (the fork's
-// B14/6A, kept).  It is also the only path of this module that draws random
-// numbers of its own: the two samples are taken on the detonation frame from the
-// synchronised scenario RNG, so both clients of a multiplayer match compute the
-// same point.  A battle that uses this path therefore sees a different
-// random-number stream than one that does not (documented; not a desync - both
-// ends run the same draw).
+// target straight back to its centre.  The platform therefore displaces the
+// projectile itself, and this function is the shared offset recipe of both
+// entries:
+//
+//   * ROT > 0 (physical flight offset, B16): the offset is drawn once at launch,
+//     the guidance aim point is moved by it every frame and the missile is set
+//     off at that point - the missile really flies to the scattered point;
+//   * Arm > 0 without ROT (burst point, B14/6A): a fuse-only projectile has no
+//     guidance to move, so only its detonation point is displaced.
+//
+// These entries are the only places in the module that draw random numbers: the
+// two samples come from the synchronised scenario RNG (at launch for the
+// physical path, on the detonation frame for the burst point), so both clients
+// of a multiplayer match compute the same point.  A battle that uses them sees
+// a different random-number stream than one that does not (documented; not a
+// desync - both ends run the same draw).
 //
 // The recipe is the one of the shaped paths: radius = Min + (Max - Min) * u ^
-// Sigma, scaled by the Divergence ramp of the distance actually flown, turned
-// into a polar offset by the angle sample and expressed in the flight frame by
-// the Aspect ellipse.  `drawU` and `drawTurn` are uniform on [0, 1]; the hook
-// maps the two RNG draws onto them (`drawTurn` is a fraction of a full turn).
-// The burst path requires Min *and* Max to be written: it has no host draw
-// window to fall back on, so a projectile that writes only one of the two keeps
-// the engine's burst point.
+// Sigma, scaled by the Divergence ramp of the distance flown (launch distance
+// for the physical path, actual distance for the burst point), turned into a
+// polar offset by the angle sample and expressed in the flight frame by the
+// Aspect ellipse.  `drawU` and `drawTurn` are uniform on [0, 1]; the hooks map
+// the two RNG draws onto them (`drawTurn` is a fraction of a full turn).  Both
+// entries require Min *and* Max to be written: they have no host draw window to
+// fall back on, so a projectile that writes only one of the two keeps the
+// engine's own point.
 
 struct BurstOffset
 {
@@ -542,5 +561,40 @@ inline BurstOffset ShapeBurstOffset(const ScatterConfig& config, const double di
 	result.OffsetX = offsetX;
 	result.OffsetY = offsetY;
 	return result;
+}
+
+// --- map clamp (physical flight offset) ------------------------------------
+//
+// A physical-scatter aim point has to stay on the map: before it moves a bullet,
+// the engine checks the new position with MapClass::CoordinatesLegal and silently
+// removes a bullet whose position is illegal (0x467A2B -> mode 2 -> UnInit, no
+// explosion and no damage at all).  The launch code therefore clamps the aim
+// point into the map's cell rectangle, one cell inside each edge and onto the
+// cell centre.  This is a map-safety clamp, not a scatter limit: the radius the
+// player configured is not reduced.
+struct ScatterAimBounds
+{
+	int MinX = 0;
+	int MaxX = 0;
+	int MinY = 0;
+	int MaxY = 0;
+};
+
+// Clamps an XY point into the bounds (which may arrive inverted, e.g. after an
+// unusual map rectangle) and returns true when the point had to be moved.
+inline bool ClampScatterAim(int& x, int& y, ScatterAimBounds bounds)
+{
+	if (bounds.MaxX < bounds.MinX)
+		std::swap(bounds.MinX, bounds.MaxX);
+
+	if (bounds.MaxY < bounds.MinY)
+		std::swap(bounds.MinY, bounds.MaxY);
+
+	const int clampedX = std::clamp(x, bounds.MinX, bounds.MaxX);
+	const int clampedY = std::clamp(y, bounds.MinY, bounds.MaxY);
+	const bool moved = clampedX != x || clampedY != y;
+	x = clampedX;
+	y = clampedY;
+	return moved;
 }
 } // namespace venture::features::scatter
