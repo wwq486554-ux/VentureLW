@@ -312,7 +312,9 @@ CellSpread=1.5               ; the area the terrain sweep covers, as usual
   cursor on an `Immune=yes` target for aircraft / infantry / units;
   `0x4423A3` lets such a warhead reach the ordinary damage path for a bridge
   repair hut (a building that is both `BridgeRepairHut=yes` and `Immune=yes`
-  returns before `TechnoClass::ReceiveDamage` on its own); `0x489286` records a
+  returns before `TechnoClass::ReceiveDamage` on its own; the next-frame
+  execution marks its target so the neutral C4 warhead passes the same gate);
+  `0x489286` records a
   detonation's centre and `CellSpread` at the entry of `MapClass::DamageArea`.
 - The kill queue is `(target, attacker, house, mode)` with one entry per target
   per frame; the terrain queue is `(coords, CellSpread)`.  Both are transient and
@@ -410,7 +412,8 @@ CellSpread=1.5               ; 地形清扫范围，按原版含义
   `LogicClass::Update` 帧头执行队列；`0x6FCB64` 让即死武器通过护甲 / `Verses` 门；
   `0x417F63` / `0x51F179` / `0x74049A` 分别让飞机 / 步兵 / 载具对 `Immune=yes`
   目标保留攻击光标；`0x4423A3` 让即死武器绕过桥梁维修小屋的
-  「`BridgeRepairHut=yes` + `Immune=yes` 提前返回」；`0x489286` 在
+  「`BridgeRepairHut=yes` + `Immune=yes` 提前返回」（下一帧处决用中性 C4 弹头，
+  会再次撞上同一道门，所以处决时会把目标标记出来让这一次调用也放行）；`0x489286` 在
   `MapClass::DamageArea` 入口登记爆炸中心与 `CellSpread`。
 - 击杀队列是 `(目标, 攻击者, 来源方, 模式)`，同一帧同一目标只留一条；地形队列是
   `(坐标, CellSpread)`。两者都是场景级瞬态，由平台的场景清理观察者

@@ -17,8 +17,12 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   `TechnoClass::ReceiveDamage`, so the hit was never recorded.  A ninth hook
   (`0x4423A3`, size 6) lets a SuddenDeath warhead jump over the pair; the
   ordinary hit is still nullified by the engine's immunity, and the next-frame
-  execution bypasses it with `IgnoreDefenses`.  (The Mobile-Origin rules the
-  fork was tested with are not `Immune`, so the fork never needed this site.)
+  execution bypasses it with `IgnoreDefenses`.  That execution uses the neutral
+  C4Warhead, so it would take the same building-level early-out again;
+  `ExecutePending` marks the target and the hook lets that single call through
+  too (the 2026-11-20 second test showed the hit recorded but the health
+  unchanged before this half of the fix).  (The Mobile-Origin rules the fork was
+  tested with are not `Immune`, so the fork never needed this site.)
 - **SuddenDeath: the 0x701900 argument block.**  The first build used
   `GET_STACK` on the by-value `args_ReceiveDamage` block, i.e. it dereferenced
   the damage pointer and never matched a warhead - the feature looked inert in
@@ -27,7 +31,8 @@ MIT-licensed VentureCore base is kept in that repository's `CHANGELOG.md`.
   `tests/test_sudden_death_args.cpp`.
 - **SuddenDeath bridge diagnostics.**  With `[Platform] LogLevel=debug` the log
   now shows each recorded detonation (`detonation cell [...]`, including how
-  many bridge cells lie inside and just outside the sweep radius), each bridge
+  many bridge cells lie inside and just outside the sweep radius and the
+  scenario's `DestroyableBridges` flag), each bridge
   candidate with its cell flags / level / Z, and the `MapClass::DamageArea`
   result of the collapse attempt.
 

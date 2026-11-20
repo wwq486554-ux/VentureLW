@@ -102,6 +102,10 @@ bool g_summaryLogged = false;
 bool g_queueLimitWarned = false;
 bool g_ionWarheadWarned = false;
 
+// Set only around the normal-mode execution call of an immune bridge repair hut;
+// see ForcedBuildingGateTarget().
+TechnoClass* g_forcedBuildingGateTarget = nullptr;
+
 // Set while the sweep itself asks the engine to collapse a bridge: the nested
 // MapClass::DamageArea call reaches our own 0x489286 hook, and that detonation
 // must not be recorded again (the IonCannon warhead is a data-driven choice and
@@ -139,6 +143,20 @@ void LogQueueLimitOnce()
 // array is checked first - a deleted object is removed from that array, a
 // pointer comparison is harmless.  Objects that are alive but in limbo are still
 // in the array; the usual state guards below handle them.
+// A bridge repair hut that is also Immune=yes returns from
+// BuildingClass::ReceiveDamage before TechnoClass::ReceiveDamage unless the
+// warhead is a SuddenDeath one (see the 0x4423A3 hook).  The normal-mode
+// execution uses the neutral C4Warhead, so it must be marked separately.
+bool IsImmuneBridgeRepairHut(const TechnoClass* const pTechno)
+{
+	const BuildingClass* const pBuilding = abstract_cast<BuildingClass*>(const_cast<TechnoClass*>(pTechno));
+
+	if (!pBuilding || !pBuilding->Type)
+		return false;
+
+	return pBuilding->Type->BridgeRepairHut && pBuilding->Type->Immune;
+}
+
 bool IsInTechnoArray(const TechnoClass* const pTechno)
 {
 	for (int index = 0; index < TechnoClass::Array.Count; ++index)
@@ -243,8 +261,21 @@ void ExecuteTechnoQueue()
 		// armour, immunity, Iron Curtain and shields cannot stop it, and the
 		// attacker passed along so the kill is still credited to whoever fired.
 		const int healthBefore = pTarget->Health;
+
+		// A bridge repair hut whose type is also Immune=yes would take the
+		// building-level early-out here again (the execution warhead is the
+		// neutral C4, not the SuddenDeath one that delivered the hit).  Mark the
+		// target for exactly this call; the 0x4423A3 hook lets it through.
+		const bool forceBuildingGate = IsImmuneBridgeRepairHut(pTarget);
+
+		if (forceBuildingGate)
+			g_forcedBuildingGateTarget = pTarget;
+
 		pTarget->ReceiveDamage(&pTarget->Health, 0, pC4Warhead, record.Attacker, true, false,
 			record.AttackingHouse);
+
+		if (forceBuildingGate)
+			g_forcedBuildingGateTarget = nullptr;
 
 		if (g_executeLogs < kExecuteLogLimit)
 		{
@@ -580,10 +611,14 @@ void RegisterDetonation(const CoordStruct& coords, const double cellSpread)
 			return true;
 		});
 
+		const int destroyableBridges =
+			ScenarioClass::Instance ? (ScenarioClass::Instance->SpecialFlags.DestroyableBridges ? 1 : 0)
+									: -1;
+
 		Log::Debug("[SuddenDeath] detonation cell [%d,%d] z=%d spread=%.2f bridge in sweep=%d "
-			"near=%d",
+			"near=%d destroyableBridges=%d",
 			static_cast<int>(cell.X), static_cast<int>(cell.Y), coords.Z, cellSpread, bridgesInSweep,
-			bridgesNear);
+			bridgesNear, destroyableBridges);
 	}
 }
 
@@ -603,6 +638,11 @@ void ExecutePending()
 	ExecuteTerrainQueue();
 }
 
+TechnoClass* ForcedBuildingGateTarget()
+{
+	return g_forcedBuildingGateTarget;
+}
+
 void __cdecl ClearPending()
 {
 	const std::size_t techno = g_technoQueue.size();
@@ -617,6 +657,7 @@ void __cdecl ClearPending()
 	g_selfDetonation = false;
 	g_summaryLogged = false;
 	g_ionWarheadWarned = false;
+	g_forcedBuildingGateTarget = nullptr;
 	g_hitLogs = 0;
 	g_executeLogs = 0;
 	g_skipLogs = 0;

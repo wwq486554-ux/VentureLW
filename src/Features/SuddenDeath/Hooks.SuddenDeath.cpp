@@ -172,6 +172,14 @@ DEFINE_HOOK(0x4423A3, Venture_SuddenDeath_BridgeRepairHutGate, 0x6)
 	if (!IsEnabled())
 		return 0;
 
+	// The platform's own normal-mode execution of such a hut uses the neutral
+	// C4Warhead, which is not a SuddenDeath warhead; ExecutePending marks the
+	// target for that single call so the kill can pass this gate too.
+	GET(TechnoClass*, pThis, ESI);
+
+	if (pThis && pThis == venture::features::sudden_death::ForcedBuildingGateTarget())
+		return NormalDamagePath;
+
 	GET_STACK(WarheadTypeClass*, pWarhead, 0xA8);
 
 	return IsSuddenDeathWarhead(pWarhead) ? NormalDamagePath : 0;

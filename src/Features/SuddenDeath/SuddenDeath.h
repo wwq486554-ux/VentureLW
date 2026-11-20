@@ -95,6 +95,13 @@ void __cdecl ClearPending();
 // the three cursor hooks to keep the Attack cursor on an `Immune=yes` target.
 bool TechnoHoldsSuddenDeathWeapon(const TechnoClass* pTechno);
 
+// The normal-mode execution of a bridge repair hut (`BridgeRepairHut=yes` plus
+// `Immune=yes`) uses the neutral C4Warhead, which would hit the same
+// building-level early-out the incoming SuddenDeath warhead was allowed through.
+// ExecutePending marks its target here for the duration of that one call; the
+// 0x4423A3 hook lets exactly that call pass.  Null the rest of the time.
+TechnoClass* ForcedBuildingGateTarget();
+
 // Diagnostics.
 std::size_t ConfiguredWarheadCount();
 std::size_t PendingTechnoCount();

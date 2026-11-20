@@ -138,6 +138,8 @@ static_assert(offsetof(TechnoTypeClass, Immune) == 0x233,
 	"TechnoTypeClass::Immune moved - re-check the YRpp pin");
 static_assert(offsetof(BuildingTypeClass, BridgeRepairHut) == 0x16B6,
 	"BuildingTypeClass::BridgeRepairHut moved - re-check the YRpp pin");
+static_assert(offsetof(BuildingClass, Type) == 0x520,
+	"BuildingClass::Type moved - re-check the YRpp pin");
 
 // Syringe register frame layout (Syringe.h, SYR_VER=2). A wrong sized frame
 // silently corrupts every hook handler.
