@@ -96,13 +96,20 @@ The table is machine-read.  Keep these rules when editing it:
 | 0x6FCB64 | 0x6 | Venture_SuddenDeath_CanFireVerses | SuddenDeath: let a weapon whose warhead carries `SuddenDeath=yes` pass the engine's armour / Verses gate, which would otherwise refuse to fire at a target with a 0% Verses entry | Feature; window `mov eax,[eax+0x9c]` (6 B, the Armor load) ends at 0x6FCB6A (`fld qword [edi+eax*8+0xa0]`, the Verses lookup); EBX = the WeaponTypeClass, EBP = the target ObjectClass and EDI = the warhead (already loaded from [ebx+0xAC]). Return 0 replays the load; return 0x6FCB8D is the engine's own "passed" point (it writes only AL, and 0x6FCB97 reloads EAX in full). Ares hooks 0x6FCB6A/7 immediately after this window and is deliberately skipped; the official Phobos / Mix / fork share this address with a shield handler whose shield-active branch returns Origin()+6, which would short-circuit this handler when a Phobos shield is active (the checked mod data uses no shields; the documented fallback is to move this row to 0x6FCB56/6) |
 | 0x489286 | 0x6 | Venture_SuddenDeath_DamageArea | SuddenDeath: record a detonation's centre and `CellSpread` at the entry of `MapClass::DamageArea` so the terrain (trees, tiberium pillars), ore and bridges inside the area are swept at the next safe point | Feature; window `sub esp,0xd4` (6 B) ends at 0x48928C (`push ebx`). The function prologue already set EBP, so ECX = the CoordStruct pointer, [ebp+8] = the source object, [ebp+0xC] = the WarheadTypeClass and [ebp+0x10] = AffectsTiberium; `WH->CellSpread` is at +0x124 (the engine itself loads it at 0x489347). The site is before the damage==0 / warhead null / Inert early exits, so a Damage=0 warhead is recorded too. Same site as Mix x2 / official Phobos x2 / fork x2 (all size 6, all return 0); Ares has no hook at this address (its 0x489270/5 and 0x4892BE/6 neighbours do not overlap) and Kratos' function-entry hook 0x489280/6 ends exactly where this window starts |
 | 0x4423A3 | 0x6 | Venture_SuddenDeath_BridgeRepairHutGate | SuddenDeath: let a SuddenDeath warhead reach the ordinary damage path for a building whose type is both `BridgeRepairHut=yes` and `Immune=yes` (the shipped original-YR bridge repair hut), which otherwise returns before `TechnoClass::ReceiveDamage` and would never be recorded | Feature; window `mov cl,[eax+0x16b6]` (6 B, the type's BridgeRepairHut flag) ends at 0x4423A9 (`test cl,cl`). The warhead is the third by-value argument at [esp+0xA8]; Ares' 0x4423E7 hook in the same function reads pDamage at 0xA0, which confirms the frame offsets. Return 0 replays the BridgeRepairHut check; return 0x4423E7 skips both the BridgeRepairHut and the Immune check and enters the ordinary path (the engine's immune check still nullifies that ordinary hit - the platform's next-frame execution is what bypasses immunity). The platform's own normal-mode execution of such a hut uses the neutral C4Warhead, so ExecutePending marks its target and this handler lets that single call through as well. Ares hooks 0x4423E7/5 (Firestorm wall) immediately after this window - no overlap; the address is free in the other audited tables. The shipped original-YR `[CABHUT]` is BridgeRepairHut=yes + Immune=yes; the Mobile-Origin data is not Immune, which is why the fork never needed this site |
+| 0x6FE67D | 0x6 | Venture_Scatter_Capture | Scatter core: at the entry of the engine's Fire_At scatter block remember the bullet type, the unscattered aim base and the 3-D distance (in this round's first commit the hooks are a read-only host-sample probe) | Feature (R10 scatter core; the round's first commit is a read-only probe, the shaping follows in the next one). Window `je 0x6FE8EE` (6 B, the `!Inaccurate` early-out) ends at 0x6FE683 (`mov dl,[ecx+0x29B]`, the Arcing check), so returning 0 replays the jump. ECX = BulletTypeClass*, ESI = the firing TechnoClass, the unscattered aim offset (muzzle -> aim) is at [esp+0x30..0x38] and is copied into crdOffset at [esp+0x94..0x9C] right before this point. Free in the audited Ares / official Phobos / Kratos / Mix hook tables; the fork declares this address for its own scatter capture, but the fork is a lineage-exclusive build that cannot be co-loaded with this platform |
+| 0x6FE71C | 0x6 | Venture_Scatter_VisibleDraw | Scatter core: the visible-branch radius draw is in EAX and is about to be turned into the polar offset (the probe reads it; the shaping commit remaps it onto `LW.BallisticScatter.*`) | Feature. Window `fld DWORD PTR [esp+0x18]` (4 B) + `mov ebx,eax` (2 B) ends at 0x6FE722 (`call 0x7C5F00`); returning 0 replays both instructions. EAX is the host's draw: the engine's own `RandomRanged(0, [CombatDamage] BallisticScatter)` normally, or Ares 3.0's draw when Ares is loaded - Ares hooks 0x6FE709/6 and returns 0x6FE71C, i.e. it jumps **to this address**, so this row is the post-Ares entry and the platform must not hook 0x6FE709 instead (that window is Ares's own). Mix / PR#2060 declares the same address with size 6 and reshapes the same draw with its own old-key logic; co-loading this platform with Mix is recorded as an unsupported scatter configuration (both handlers write EAX, so the last one in the chain wins) |
+| 0x6FE821 | 0x6 | Venture_Scatter_LegacyDraw | Scatter core: the legacy `Inaccurate` branch's radius draw is in EAX (the probe reads it; the shaping commit remaps it and adds the distance ramp, because the engine has no distance term on this branch) | Feature. Window `mov edx,ds:0x00A8B230` (6 B) ends at 0x6FE827 (`push 0x7FFFFFFE`); returning 0 replays the load. Same Ares rule as the visible branch: Ares hooks 0x6FE7FE/5 and returns 0x6FE821, so this row is the post-Ares entry. Mix declares the same address/size (same co-load caveat as the visible row) |
+| 0x6FE8EE | 0x6 | Venture_Scatter_FireAtExit | Scatter core: exit of the engine's Fire_At scatter block - the scattered offset is final in crdOffset and the facing/velocity/firing solution are derived from it right afterwards (the probe logs the offset; the shaping commit applies the 2-D true-ellipse remap here) | Feature. Window `mov edx,[ecx+0x2DC]` (6 B) ends at 0x6FE8F4 (`test edx,edx`); returning 0 replays the load. ECX = BulletTypeClass*, crdOffset at [esp+0x94..0x9C]; on the block's early-outs the value still equals the captured aim base, so the handler is a no-op there. Free in the audited Ares / official Phobos / Kratos / Mix tables; the fork declares this address for its own aspect shaping (lineage-exclusive, not co-loadable) |
 
-Sixty-three hook records, fifty-nine distinct hook handler names
+Sixty-seven hook records, sixty-three distinct hook handler names
 (`Venture_Example_UnitClass_DTOR` is installed at two addresses and
 `Venture_UI_DrawRadialIndicator_LargeEllipse` at two addresses, both with
 `DEFINE_HOOK_AGAIN`); the twenty-two ViewZoom records added by the R3
 migration and the nine SuddenDeath records added by the R4 migration all use
-unique `DEFINE_HOOK` handler names.
+unique `DEFINE_HOOK` handler names. The four `Venture_Scatter_*` records are the R10
+scatter-core round's first commit: a read-only host-sample probe (the addresses and
+sizes are final, the handler bodies are replaced by the real shaping later in the
+round).
 
 The twenty-two `Venture_ViewZoom_*` rows are the R3 platform migration of the
 fork's view-zoom feature.  Their addresses, sizes and covered instructions are
@@ -132,6 +139,20 @@ a Phobos shield is active on the target it returns Origin()+6 and short-circuits
 this handler; the checked mod data uses no shields, and the documented fallback
 is to move the row to the free 0x6FCB56/6 site.
 
+
+The four `Venture_Scatter_*` rows were added by the R10 scatter-core round as a
+read-only host-sample probe first: the design requires the host sample shape to be
+measured on the real machine before the area-uniform ellipse mapping is written.
+The site choice is dictated by the co-load audit: Ares 3.0 hooks 0x6FE709 and
+0x6FE7FE and jumps with a non-zero return into 0x6FE71C / 0x6FE821, so the draw is
+read at the post-Ares addresses; 0x6FE67D and 0x6FE8EE are free apart from the
+fork.  The classic FlakScatter+Inviso path (BulletClass::MoveTo 0x4687F8 /
+0x4688A9) is deliberately not probed and is shaped in the next commit at the shared
+0x4687F8 radius site only: the post-scatter sites on that path are owned by Ares
+(0x4688BD always returns 0x468A3F) and by the official Phobos / Mix obstacle handler
+(0x4688A9 returns 0x4688BD for Inviso bullets), so a chained handler there would
+never run.  That path therefore gets radius shaping only - no 2-D ellipse - and the
+limitation is documented.
 ## What "size" means
 
 A SyringeEx hook does not patch the whole function - it overwrites the first

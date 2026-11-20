@@ -55,6 +55,8 @@
     <ClCompile Include="src\Features\Example\ExampleIniDemo.cpp" />
     <ClCompile Include="src\Features\RadialIndicator\RadialIndicator.cpp" />
     <ClCompile Include="src\Features\ROFCurve\ROFCurveFeature.cpp" />
+    <ClCompile Include="src\Features\Scatter\Hooks.Scatter.cpp" />
+    <ClCompile Include="src\Features\Scatter\ScatterFeature.cpp" />
     <ClCompile Include="src\Features\SuddenDeath\Hooks.SuddenDeath.cpp" />
     <ClCompile Include="src\Features\SuddenDeath\SuddenDeath.cpp" />
     <ClCompile Include="src\Features\SuddenDeath\SuddenDeathFeature.cpp" />
@@ -104,6 +106,7 @@
     <ClInclude Include="src\Features\SuddenDeath\BridgeTiles.h" />
     <ClInclude Include="src\Features\SuddenDeath\ReceiveDamageArgs.h" />
     <ClInclude Include="src\Features\SuddenDeath\SuddenDeathMode.h" />
+    <ClInclude Include="src\Features\Scatter\Scatter.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

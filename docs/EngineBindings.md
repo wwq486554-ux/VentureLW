@@ -635,7 +635,39 @@ the level semantics, the measured cost and the hot-path rules.  The binding side
    crashes the game on the first hit.)
 5. When the YRpp pin changes, follow `docs/Updating.md`.
 
+## Scatter core binding (R10)
+
+The scatter core (P1/R10) reads the bullet type's scatter flags and the bullet's
+aim / target coordinates, and writes back the engine's scatter results.  The
+engine-side facts it depends on, all re-checked against `gamemd.exe` this round:
+
+* `TechnoClass::Fire_At` scatter block `0x6FE67D`-`0x6FE8EE`: `BulletTypeClass+0x2A2`
+  is `Inaccurate`, `+0x29B` `Arcing`, `+0x2A3` `FlakScatter` and `+0x29E` `Inviso`;
+  the unscattered aim offset is at `[esp+0x30..0x38]` and the scattered result is
+  written to `crdOffset` at `[esp+0x94..0x9C]`.  Ares 3.0 hooks `0x6FE709/6` and
+  `0x6FE7FE/5` and returns into `0x6FE71C` / `0x6FE821`, so the platform reads the
+  draw at the post-Ares addresses.
+* `BulletClass::MoveTo` (function at `0x468670`; the fork's handlers call it
+  "Unlimbo", but the vtable evidence in this round's audit identifies it as
+  `MoveTo`): the classic `FlakScatter && Inviso` branch draws the radius at
+  `0x4687F8` (EAX = `RandomRanged(0, 2 * Rules.BallisticScatter) * round(3D
+  distance) / WeaponType::Range`) and stores the polar result into the target
+  coordinate copy at `[esp+0x44..0x4C]`, not into `crdOffset`.  The platform shapes
+  that path at `0x4687F8` only; its post-scatter sites are owned by Ares
+  (`0x4688BD` always returns `0x468A3F`) and by the official Phobos / Mix obstacle
+  handler (`0x4688A9` returns `0x4688BD` for Inviso bullets).
+* Measured field offsets (pinned in `src/Engine/EngineCompat.h`):
+  `BulletClass::Type = 0xAC`, `SourceCoords = 0x134`, `TargetCoords = 0x140`;
+  `BulletTypeClass::Arcing = 0x29B`, `Inviso = 0x29E`, `Inaccurate = 0x2A2`,
+  `FlakScatter = 0x2A3`; `RulesClass::BallisticScatter = 0x1734`.  Reproduce with
+  `scripts/linux/abi_probe.sh`.
+* The bullet type keys are read in the `BulletTypeClass::LoadFromINI` success
+  epilogue `0x46C41C/0xA` (ESI = the type, `CCINIClass*` at `[esp+0x90]`); the
+  failure path `0x46C429` has no section and is not hooked.  Ares and Kratos hook
+  both paths, the official Phobos / Mix only the success path; all return 0.
+
 ## Limits in 2.1.0
+
 
 * The savegame trailer persists extension state (see `docs/SaveFormat.md`); it is
   not a general savegame fork - the engine's own object format is untouched.
