@@ -101,6 +101,7 @@
     <ClInclude Include="src\Features\ViewZoom\ViewZoomFeature.h" />
     <ClInclude Include="src\Features\ViewZoom\ViewZoomLevels.h" />
     <ClInclude Include="src\Features\SuddenDeath\SuddenDeath.h" />
+    <ClInclude Include="src\Features\SuddenDeath\ReceiveDamageArgs.h" />
     <ClInclude Include="src\Features\SuddenDeath\SuddenDeathMode.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

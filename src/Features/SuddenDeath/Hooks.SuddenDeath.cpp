@@ -19,6 +19,7 @@
 #include <Helpers/Macro.h>
 
 #include "Engine/EngineCompat.h"
+#include "Features/SuddenDeath/ReceiveDamageArgs.h"
 #include "Features/SuddenDeath/SuddenDeath.h"
 
 using venture::features::sudden_death::ExecutionMode;
@@ -39,7 +40,11 @@ DEFINE_HOOK(0x701900, Venture_SuddenDeath_HitRegister, 0x6)
 		return 0;
 
 	GET(TechnoClass*, pTarget, ECX);
-	GET_STACK(args_ReceiveDamage*, pArgs, 0x4);
+
+	// The seven parameters are passed by value; see ReceiveDamageArgs.h for why
+	// this must be the block address (LEA_STACK) and not a dereference
+	// (GET_STACK) - the first build got that wrong and the feature was inert.
+	args_ReceiveDamage* const pArgs = venture::features::sudden_death::GetReceiveDamageArgs(R);
 
 	if (!pTarget || !pArgs || !pArgs->WH)
 		return 0;
