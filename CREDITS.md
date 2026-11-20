@@ -51,6 +51,21 @@
   explicitly.  The three commands are registered through the platform command
   registry (`Venture View Zoom In` / `Venture View Zoom Out` /
   `Venture Reset View Zoom`).
+- **Scatter core (universal scatter shaping + physical flight offset)** - original
+  fork implementation of the platform's scatter side: the `BallisticScatter.*`
+  radius window, `Sigma` / `Aspect` / `Divergence`, the burst-point offset and the
+  physical flight offset (fork records: the scatter-mechanism fixes, the
+  projectile-missile scatter record and the physical-offset record), ported to
+  VentureLW 2026-11-20.  The platform re-derives the engine's own draw instead of
+  touching the vanilla keys and uses only `LW.BallisticScatter.*` (zero shared
+  keys, no conflict switch).  Deliberate differences: `Sigma` defaults to 0.5
+  (area-uniform), `Min` / `Max` mean the radius at full range on every path, the
+  segmented `IncreaseByRange` family is read but not applied, and there is **no
+  `Physical` key** - a guided missile that writes the keys is physically
+  scattered automatically, while an `Arm`-only fuse falls back to the burst
+  point.  The engine's own scatter sites are only read, never patched; the
+  original `BallisticScatter` keys come from Ares / Phobos (behavioural
+  reference, no code copied).
 
 ## Pending attribution (not in this build yet)
 
